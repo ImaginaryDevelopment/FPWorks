@@ -606,17 +606,28 @@ module WorldModule =
                     then World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
                     else World.publish World.sortSubscriptionsByPickingPriority MouseMoveEventAddress Address.empty (MouseButtonData { Position = mousePosition; Button = MouseLeft }) world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONDOWN ->
-                    let mousePosition = World.getMousePositionF world
+                    
                     let mouseButton = World.toNuMouseButton <| uint32 event.button.button
-                    let mouseEventAddress = DownMouseEventAddress @+ [string mouseButton]
-                    let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton }
-                    World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
+                    let mousePosition = World.getMousePositionF world
+                    if mouseButton.IsSome then 
+                        printfn "mouseButtonDown.IsSome"
+                        let mouseEventAddress = DownMouseEventAddress @+ [string mouseButton.Value]
+                        let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton.Value }
+                        World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
+                    else
+                        World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONUP ->
-                    let mousePosition = World.getMousePositionF world
                     let mouseButton = World.toNuMouseButton <| uint32 event.button.button
-                    let mouseEventAddress = UpMouseEventAddress @+ [string mouseButton]
-                    let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton }
-                    World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
+                    let mousePosition = World.getMousePositionF world
+
+                    if mouseButton.IsSome then
+                        printfn "mouseButtonUp.IsSome"
+                        let mouseEventAddress = UpMouseEventAddress @+ [string mouseButton.Value]
+                        let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton.Value }
+                        World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
+                    else
+                        World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
+
                 | SDL.SDL_EventType.SDL_KEYDOWN ->
                     let key = event.key.keysym
                     let eventData = KeyboardKeyData { ScanCode = uint32 key.scancode }
