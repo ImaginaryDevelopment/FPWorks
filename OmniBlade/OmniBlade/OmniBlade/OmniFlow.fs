@@ -44,7 +44,7 @@ module OmniFlow =
         match optWorld with
         | Right world ->
             let world = World.hintRenderingPackageUse UIPackageName world
-            let world = World.playSong GameSong 1.0f DefaultTimeToFadeOutSongMs world
+            // let world = World.playSong GameSong 1.0f DefaultTimeToFadeOutSongMs world
             let splashScreenImage = { ImageAssetName = "Image5"; PackageName = DefaultPackageName }
             let (splashScreen, world) = World.addSplashScreenFromData TitleAddress SplashAddress typeof<ScreenDispatcher>.Name IncomingTimeSplash IdlingTime OutgoingTimeSplash splashScreenImage world
             let world = addTitleScreen world
