@@ -25,10 +25,10 @@ module OmniDispatchersModule =
             let address = Event.unwrapA event
             (Cascade, adjustFieldCamera address world)
 
-        let handleKeyboardKeyDown event world = 
+        let handleKeyboardKeyDown event world : EventHandling*World = 
             let keyboardKeyData = Event.unwrapD event
             match (enum<SDL.SDL_Scancode> keyboardKeyData.ScanCode, keyboardKeyData.IsRepeat) with
-            | (SDL.SDL_Scancode.SDL_SCANCODE_ESCAPE, false) -> () (* what goes here to trigger the back button? *)  ; (Cascade, world)
+            | (SDL.SDL_Scancode.SDL_SCANCODE_ESCAPE, false) -> (* what goes here to trigger the back button? *) (Cascade, world)
             | _ -> (Cascade, world)
 
         let handleMoveFieldAvatar event world =
@@ -58,7 +58,7 @@ module OmniDispatchersModule =
             let world = World.monitor TickEventAddress address handleMoveFieldAvatar world
             let world = World.monitor TickEventAddress address handleAdjustFieldCamera world
             let world = World.addPhysicsMessage (SetGravityMessage Vector2.Zero) world
-            let world = World.monitor DownKeyboardKeyEventAddress address handleKeyboardKeyDown
+            let world = World.monitor DownKeyboardKeyEventAddress address handleKeyboardKeyDown world
             let world = adjustFieldCamera address world
             (avatar, world)
 
