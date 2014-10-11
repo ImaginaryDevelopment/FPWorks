@@ -11,12 +11,11 @@
 #r "../../../../FPWorks/Nu/SDL2#/Debug/SDL2#.dll"
 #r "../../../../FPWorks/Nu/TiledSharp/Debug/TiledSharp.dll"
 System.IO.Directory.SetCurrentDirectory "../../../../FPWorks/Nu/Nu/Nu/bin/Debug"
-#r "C:/Development/FPWorks/SDL2Addendum/SDL2Addendum/SDL2Addendum/bin/Debug/SDL2Addendum.dll"
+#r "../../../../FPWorks/SDL2Addendum/SDL2Addendum/SDL2Addendum/bin/Debug/SDL2Addendum.dll"
 
 #load "RQueue.fs"
 #load "Address.fs"
 #load "Core.fs"
-#load "address.fs"
 #load "Constants.fs"
 
 #load "Math.fs"
