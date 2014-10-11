@@ -39,8 +39,8 @@ module MouseState =
         | SDL2.SDL.SDL_BUTTON_LEFT -> Some MouseLeft
         | SDL2.SDL.SDL_BUTTON_MIDDLE -> Some MouseCenter
         | SDL2.SDL.SDL_BUTTON_RIGHT -> Some MouseRight
-        | SDL2.SDL.SDL_BUTTON_X1 -> MouseX1
-        | SDL2.SDL.SDL_BUTTON_X2 -> MouseX2
+        | SDL2.SDL.SDL_BUTTON_X1 -> Some MouseX1
+        | SDL2.SDL.SDL_BUTTON_X2 -> Some MouseX2
         | _ -> printfn "Button ignored %A" mouseButton; None // failwith "Invalid SDL mouse button."
 
         
