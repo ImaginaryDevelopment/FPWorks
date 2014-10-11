@@ -22,10 +22,10 @@ module WorldModule =
     type World with
 
         static member handleAsSwallow _ (world : World) =
-            (Resolved, world)
+            (Resolve, world)
 
         static member handleAsExit _ (world : World) =
-            (Resolved, World.exit world)
+            (Resolve, World.exit world)
 
     let private ScreenTransitionDownMouseKey = World.makeSubscriptionKey ()
     let private ScreenTransitionUpMouseKey = World.makeSubscriptionKey ()
@@ -85,7 +85,7 @@ module WorldModule =
                     let subscription = fun _ world ->
                         let world = World.unsubscribe subscriptionKey world
                         let world = snd <| World.selectScreen destinationAddress destinationScreen world
-                        (Propagate, world)
+                        (Cascade, world)
                     let world = snd <| World.setScreenState OutgoingState selectedScreenAddress selectedScreen world
                     let world = World.subscribe subscriptionKey (FinishOutgoingEventAddress + selectedScreenAddress) selectedScreenAddress subscription world
                     Some world
@@ -95,15 +95,15 @@ module WorldModule =
         static member handleAsScreenTransitionFromSplash destinationAddress _ world =
             let destinationScreen = World.getScreen destinationAddress world
             let world = snd <| World.selectScreen destinationAddress destinationScreen world
-            (Propagate, world)
+            (Cascade, world)
 
         static member handleAsScreenTransition destinationAddress _ world =
             let destinationScreen = World.getScreen destinationAddress world
             match World.tryTransitionScreen destinationAddress destinationScreen world with
-            | Some world -> (Propagate, world)
+            | Some world -> (Cascade, world)
             | None ->
                 trace <| "Program Error: Invalid screen transition for destination address '" + string destinationAddress + "'."
-                (Propagate, world)
+                (Cascade, world)
 
         // OPTIMIZATION: priority annotated as single to decrease GC pressure.
         static member private sortFstDesc (priority : single, _) (priority2 : single, _) =
@@ -203,13 +203,13 @@ module WorldModule =
                                   PublisherAddress = publisherAddress
                                   OptPublisher = World.getOptSimulant publisherAddress world
                                   Data = eventData }
-                            if  (match eventHandling with Propagate -> true | Resolved -> false) &&
+                            if  (match eventHandling with Cascade -> true | Resolve -> false) &&
                                 (match world.State.Liveness with Running -> true | Exiting -> false) then
                                 let result = subscription event world
                                 Some result
                             else None
-                        | None -> Some (Propagate, world))
-                    (Propagate, world)
+                        | None -> Some (Cascade, world))
+                    (Cascade, world)
                     subscriptions
             world
 
@@ -264,7 +264,7 @@ module WorldModule =
             World.unsubscribe subscriptionKey world
 
         /// Keep active a subscription for the lifetime of a simulant.
-        static member private observeDefinition eventAddress subscriberAddress subscription world =
+        static member private monitorDefinition eventAddress subscriberAddress subscription world =
             if not <| Address.isEmpty subscriberAddress then
                 let observationKey = World.makeSubscriptionKey ()
                 let removalKey = World.makeSubscriptionKey ()
@@ -272,9 +272,9 @@ module WorldModule =
                 let subscription = fun _ world ->
                     let world = World.unsubscribe removalKey world
                     let world = World.unsubscribe observationKey world
-                    (Propagate, world)
+                    (Cascade, world)
                 World.subscribe removalKey (RemovingEventAddress + subscriberAddress) subscriberAddress subscription world
-            else failwith "Cannot observe events with an anonymous subscriber."
+            else failwith "Cannot monitor events with an anonymous subscriber."
 
         static member saveGroupToFile group entities fileName world =
             use file = File.Open (fileName, FileMode.Create)
@@ -355,27 +355,27 @@ module WorldModule =
         static member private handleSplashScreenIdleTick idlingTime ticks event world =
             let world = World.unsubscribe SplashScreenTickKey world
             if ticks < idlingTime then
-                let subscription = World.handleSplashScreenIdleTick idlingTime (incL ticks)
+                let subscription = World.handleSplashScreenIdleTick idlingTime (inc ticks)
                 let world = World.subscribe SplashScreenTickKey event.Address event.SubscriberAddress subscription world
-                (Propagate, world)
+                (Cascade, world)
             else
                 match World.getOptSelectedScreenAddress world with
                 | Some selectedScreenAddress ->
                     match World.getOptScreen selectedScreenAddress world with
                     | Some selectedScreen ->
                         let world = snd <| World.setScreenState OutgoingState selectedScreenAddress selectedScreen world
-                        (Propagate, world)
+                        (Cascade, world)
                     | None ->
                         trace "Program Error: Could not handle splash screen tick due to no selected screen."
-                        (Resolved, World.exit world)
+                        (Resolve, World.exit world)
                 | None ->
                     trace "Program Error: Could not handle splash screen tick due to no selected screen."
-                    (Resolved, World.exit world)
+                    (Resolve, World.exit world)
 
         static member internal handleSplashScreenIdle idlingTime event world =
             let subscription = World.handleSplashScreenIdleTick idlingTime 0L
             let world = World.subscribe SplashScreenTickKey TickEventAddress event.SubscriberAddress subscription world
-            (Resolved, world)
+            (Resolve, world)
 
         static member addSplashScreenFromData destination address screenDispatcherName incomingTime idlingTime outgoingTime image world =
             let splashScreen = World.makeDissolveScreen screenDispatcherName (Some <| Address.head address) incomingTime outgoingTime world
@@ -386,8 +386,8 @@ module WorldModule =
             let splashLabel = Entity.setLabelImage image splashLabel
             let splashGroupDescriptors = Map.singleton splashGroup.Name (splashGroup, Map.singleton splashLabel.Name splashLabel)
             let world = snd <| World.addScreen address splashScreen splashGroupDescriptors world
-            let world = World.observe (FinishIncomingEventAddress + address) address (World.handleSplashScreenIdle idlingTime) world
-            let world = World.observe (FinishOutgoingEventAddress + address) address (World.handleAsScreenTransitionFromSplash destination) world
+            let world = World.monitor (FinishIncomingEventAddress + address) address (World.handleSplashScreenIdle idlingTime) world
+            let world = World.monitor (FinishOutgoingEventAddress + address) address (World.handleAsScreenTransitionFromSplash destination) world
             (splashScreen, world)
 
         static member addDissolveScreenFromFile screenDispatcherName groupFileName incomingTime outgoingTime screenAddress world =
@@ -629,12 +629,14 @@ module WorldModule =
                         World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
 
                 | SDL.SDL_EventType.SDL_KEYDOWN ->
-                    let key = event.key.keysym
-                    let eventData = KeyboardKeyData { ScanCode = uint32 key.scancode }
+                    let keyboard = event.key
+                    let key = keyboard.keysym
+                    let eventData = KeyboardKeyData { ScanCode = int key.scancode; IsRepeat = keyboard.repeat <> byte 0 }
                     World.publish World.sortSubscriptionsByHierarchy DownKeyboardKeyEventAddress Address.empty eventData world
                 | SDL.SDL_EventType.SDL_KEYUP ->
-                    let key = event.key.keysym
-                    let eventData = KeyboardKeyData { ScanCode = uint32 key.scancode }
+                    let keyboard = event.key
+                    let key = keyboard.keysym
+                    let eventData = KeyboardKeyData { ScanCode = int key.scancode; IsRepeat = keyboard.repeat <> byte 0 }
                     World.publish World.sortSubscriptionsByHierarchy UpKeyboardKeyEventAddress Address.empty eventData world
                 | _ -> world
             (world.State.Liveness, world)
@@ -893,4 +895,4 @@ module WorldModule =
             World.subscribe4 <- World.subscribe4Definition
             World.unsubscribe <- World.unsubscribeDefinition
             World.withSubscription <- World.withSubscriptionDefinition
-            World.observe <- World.observeDefinition
+            World.monitor <- World.monitorDefinition

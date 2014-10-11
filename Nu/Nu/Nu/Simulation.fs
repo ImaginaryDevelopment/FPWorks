@@ -84,7 +84,8 @@ module SimModule =
 
     /// The data for a keyboard key event.
     type [<StructuralEquality; NoComparison>] KeyboardKeyData =
-        { ScanCode : uint32 }
+        { ScanCode : int
+          IsRepeat : bool }
 
     /// The data for a collision event.
     type [<StructuralEquality; NoComparison>] CollisionData =
@@ -124,10 +125,10 @@ module SimModule =
           OptPublisher : Simulant option
           Data : EventData }
 
-    /// Describes whether an event has been resolved or should be propagated.
+    /// Describes whether an event has been resolved or should cascade.
     and EventHandling =
-        | Resolved
-        | Propagate
+        | Resolve
+        | Cascade
 
     /// Describes a game event subscription.
     and Subscription =
@@ -438,7 +439,7 @@ module World =
     let mutable withSubscription = Unchecked.defaultof<Address -> Address -> Subscription -> (World -> World) -> World -> World>
     
     /// Keep active a subscription for the lifetime of a simulant.
-    let mutable observe = Unchecked.defaultof<Address -> Address -> Subscription -> World -> World>
+    let mutable monitor = Unchecked.defaultof<Address -> Address -> Subscription -> World -> World>
 
     /// Make a key used to track an unsubscription with a subscription.
     let makeSubscriptionKey () =

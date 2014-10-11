@@ -6,6 +6,36 @@ open System
 open System.Configuration
 open System.Text
 open Prime
+open Nu
+
+[<AutoOpen>]
+module NameKeyModule =
+
+    /// A name key for optimized look-up in hashing containers.
+    /// TODO: check if turning this into a struct could improve performance.
+    /// TODO: maybe put this in another place?
+    type [<CustomEquality; NoComparison>] NameKey =
+        { NKHash : int // OPTIMIZATION: hash is most frequently accessed, so comes first
+          NKName : string }
+
+        interface NameKey IEquatable with
+            member this.Equals that =
+                this.NKName = that.NKName
+
+        override this.Equals that =
+            match that with
+            | :? NameKey as that -> this.NKName = that.NKName
+            | _ -> false
+
+        override this.GetHashCode () =
+            this.NKHash
+
+[<RequireQualifiedAccess>]
+module NameKey =
+
+    let make addressName =
+        { NKHash = hash addressName
+          NKName = addressName }
 
 [<AutoOpen>]
 module AddressModule =
@@ -13,9 +43,15 @@ module AddressModule =
     /// Specifies the address of an element in a game, or name of an event.
     /// OPTIMIZATION: Comparison is done using a reversed list since the backs of addresses tend to
     /// be much more unique than the fronts.
+    /// OPTIMIZATION: In the face of using a PersistentHashMap for simulant storage, I've made the
+    /// AddrNameKeys field available for faster look-ups.
+    /// OPTIMIZATION: At little cost, I've also added the AddrHash field for fast keying directly
+    /// on addresses.
     type [<CustomEquality; CustomComparison>] Address =
         { AddrList : string list
-          AddrListRev : string list }
+          AddrListRev : string list
+          AddrNameKeys : NameKey list
+          AddrHash : int }
 
         static member internal join (list : string list) =
             String.Join ("/", list)
@@ -25,7 +61,9 @@ module AddressModule =
 
         /// Make an address from a list of strings.
         static member make list =
-            { AddrList = list; AddrListRev = List.rev list }
+            let keys = List.map (fun name -> NameKey.make name) list
+            let hash = List.fold (fun hash key -> hash ^^^ key.NKHash) 0 keys
+            { AddrList = list; AddrListRev = List.rev list; AddrNameKeys = keys; AddrHash = hash }
 
         /// Concatenate two addresses.
         static member (+) (address, address2) =
@@ -52,10 +90,7 @@ module AddressModule =
             | _ -> false
 
         override this.GetHashCode () =
-            let mutable result = 0
-            for name in this.AddrList do
-                result <- result ^^^ hash name
-            result
+            this.AddrHash
         
         override this.ToString () =
             Address.join this.AddrList
