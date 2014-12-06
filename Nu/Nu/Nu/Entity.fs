@@ -10,6 +10,7 @@ open TiledSharp
 open Prime
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 
 [<AutoOpen>]
 module EntityModule =
@@ -22,6 +23,7 @@ module EntityModule =
         static member setRotation rotation (entity : Entity) = { entity with Rotation = rotation }
         static member setVisible visible (entity : Entity) = { entity with Visible = visible }
         static member setViewType viewType (entity : Entity) = { entity with ViewType = viewType }
+        static member setPersistent persistent (entity : Entity) = { entity with Persistent = persistent }
 
         static member register address (entity : Entity) world =
             let (entity, world) = entity.DispatcherNp.Register (address, entity, world)
@@ -67,41 +69,51 @@ module EntityModule =
         static member getPickingPriority (entity : Entity) world =
             entity.DispatcherNp.GetPickingPriority (entity, world)
 
-        static member isFacetCompatible facet (entity : Entity) =
+        static member getFacetNames entity =
+            List.map Reflection.getTypeName entity.FacetsNp
+
+        static member isFacetCompatible entityDispatcherMap facet (entity : Entity) =
             let facetType = facet.GetType ()
             let facetFieldDefinitions = Reflection.getFieldDefinitions facetType
-            List.notExists
-                (fun definition ->
-                    match Map.tryFind definition.FieldName entity.Xtension.XFields with
-                    | Some field -> field.GetType () <> definition.FieldType
-                    | None -> false)
-                facetFieldDefinitions
+            if Reflection.isFacetCompatibleWithDispatcher entityDispatcherMap facet entity then
+                List.notExists
+                    (fun definition ->
+                        match Map.tryFind definition.FieldName entity.Xtension.XFields with
+                        | Some field -> field.GetType () <> definition.FieldType
+                        | None -> false)
+                    facetFieldDefinitions
+            else false
 
-        static member make dispatcherName dispatcher optName =
+        static member dispatchesAs (dispatcherTargetType : Type) (entity : Entity) =
+            Reflection.dispatchesAs dispatcherTargetType entity.DispatcherNp
+
+        static member make dispatcher optOverlayName optName =
             let id = Core.makeId ()
             { Id = id
-              Name = match optName with None -> string id | Some name -> name
+              Name = match optName with None -> acstring id | Some name -> name
               Position = Vector2.Zero
               Depth = 0.0f
               Size = DefaultEntitySize
               Rotation = 0.0f
               Visible = true
               ViewType = Relative
+              Persistent = true
+              CreationTimeNp = DateTime.UtcNow
               DispatcherNp = dispatcher
               FacetNames = []
               FacetsNp = []
-              OptOverlayName = Some dispatcherName
+              OptOverlayName = optOverlayName
               Xtension = { XFields = Map.empty; CanDefault = false; Sealed = true } }
 
     type [<StructuralEquality; NoComparison>] TileMapData =
         { Map : TmxMap
-          MapSize : Vector2I
-          TileSize : Vector2I
+          MapSize : Vector2i
+          TileSize : Vector2i
           TileSizeF : Vector2
-          TileMapSize : Vector2I
+          TileMapSize : Vector2i
           TileMapSizeF : Vector2
           TileSet : TmxTileset
-          TileSetSize : Vector2I }
+          TileSetSize : Vector2i }
 
     type [<StructuralEquality; NoComparison>] TileData =
         { Tile : TmxLayerTile
@@ -109,17 +121,17 @@ module EntityModule =
           J : int
           Gid : int
           GidPosition : int
-          Gid2 : Vector2I
+          Gid2 : Vector2i
           OptTileSetTile : TmxTilesetTile option
-          TilePosition : Vector2I }
+          TilePosition : Vector2i }
 
 [<AutoOpen>]
 module WorldEntityModule =
 
     type World with
 
-        static member private optEntityFinder address world =
-            match address.AddrList with
+        static member private optEntityFinder (address : Entity Address) world =
+            match address.Names with
             | [screenName; groupName; entityName] ->
                 let optGroupMap = Map.tryFind screenName world.Entities
                 match optGroupMap with
@@ -129,16 +141,14 @@ module WorldEntityModule =
                     | Some entityMap -> Map.tryFind entityName entityMap
                     | None -> None
                 | None -> None
-            | _ -> failwith <| "Invalid entity address '" + string address + "'."
+            | _ -> failwith <| "Invalid entity address '" + acstring address + "'."
 
-        static member private entityAdder address world (entity : Entity) =
-            match address.AddrList with
+        static member private entityAdder (address : Entity Address) world (entity : Entity) =
+            match address.Names with
             | [screenName; groupName; entityName] ->
-                let optGroupMap = Map.tryFind screenName world.Entities
-                match optGroupMap with
+                match Map.tryFind screenName world.Entities with
                 | Some groupMap ->
-                    let optEntityMap = Map.tryFind groupName groupMap
-                    match optEntityMap with
+                    match Map.tryFind groupName groupMap with
                     | Some entityMap ->
                         let entityMap = Map.add entityName entity entityMap
                         let groupMap = Map.add groupName entityMap groupMap
@@ -151,10 +161,10 @@ module WorldEntityModule =
                     let entityMap = Map.singleton entityName entity
                     let groupMap = Map.singleton groupName entityMap
                     { world with Entities = Map.add screenName groupMap world.Entities }
-            | _ -> failwith <| "Invalid entity address '" + string address + "'."
+            | _ -> failwith <| "Invalid entity address '" + acstring address + "'."
 
-        static member private entityRemover address world =
-            match address.AddrList with
+        static member private entityRemover (address : Entity Address)  world =
+            match address.Names with
             | [screenName; groupName; entityName] ->
                 let optGroupMap = Map.tryFind screenName world.Entities
                 match optGroupMap with
@@ -167,14 +177,14 @@ module WorldEntityModule =
                         { world with Entities = Map.add screenName groupMap world.Entities }
                     | None -> world
                 | None -> world
-            | _ -> failwith <| "Invalid entity address '" + string address + "'."
+            | _ -> failwith <| "Invalid entity address '" + acstring address + "'."
 
         static member getEntity address world = Option.get <| World.optEntityFinder address world
         static member private setEntityWithoutEvent address entity world = World.entityAdder address world entity
-        static member setEntity address entity world = 
-                let oldEntity = Option.get <| World.optEntityFinder address world
-                let world = World.entityAdder address world entity
-                World.publish4 (ChangeEventAddress + address) address (EntityChangeData { OldEntity = oldEntity }) world
+        static member setEntity address entity world =
+            let oldEntity = Option.get <| World.optEntityFinder address world
+            let world = World.entityAdder address world entity
+            World.publish4 { OldEntity = oldEntity } (EntityChangeEventAddress ->>- address) address world
 
         static member getOptEntity address world = World.optEntityFinder address world
         static member containsEntity address world = Option.isSome <| World.getOptEntity address world
@@ -183,16 +193,8 @@ module WorldEntityModule =
             | Some entity -> World.entityAdder address world entity
             | None -> World.entityRemover address world
 
-        static member getEntities1 world =
-            seq {
-                for screenKvp in world.Entities do
-                    for groupKvp in screenKvp.Value do
-                        for entityKvp in groupKvp.Value do
-                            let address = Address.make [screenKvp.Key; groupKvp.Key; entityKvp.Key]
-                            yield (address, entityKvp.Value) }
-    
-        static member getEntities groupAddress world =
-            match groupAddress.AddrList with
+        static member getEntityMap (groupAddress : Group Address) world =
+            match groupAddress.Names with
             | [screenName; groupName] ->
                 match Map.tryFind screenName world.Entities with
                 | Some groupMap ->
@@ -200,12 +202,26 @@ module WorldEntityModule =
                     | Some entityMap -> entityMap
                     | None -> Map.empty
                 | None -> Map.empty
-            | _ -> failwith <| "Invalid group address '" + string groupAddress + "'."
+            | _ -> failwith <| "Invalid group address '" + acstring groupAddress + "'."
 
-        static member getEntities3 groupAddress entityNames world =
+        static member getEntities groupAddress world =
+            let entityMap = World.getEntityMap groupAddress world
+            Map.toValueSeq entityMap
+
+        static member getEntityMap3 entityNames (groupAddress : Group Address) world =
             let entityNames = Set.ofSeq entityNames
-            let entitys = World.getEntities groupAddress world
-            Map.filter (fun entityName _ -> Set.contains entityName entityNames) entitys
+            let entityMap = World.getEntityMap groupAddress world
+            Map.filter (fun entityName _ -> Set.contains entityName entityNames) entityMap
+
+        static member getEntities3 entityNames groupAddress world =
+            let entityMap = World.getEntityMap3 groupAddress entityNames world
+            Map.toValueSeq entityMap
+
+        static member setEntities groupAddress entities world =
+            Seq.fold
+                (fun world (entity : Entity) -> World.setEntity (gatoea groupAddress entity.Name) entity world)
+                world
+                entities
 
         static member private registerEntity address entity world =
             Entity.register address entity world
@@ -213,8 +229,8 @@ module WorldEntityModule =
         static member private unregisterEntity address entity world =
             Entity.unregister address entity world
 
-        static member removeEntityImmediate address entity world =
-            let world = World.publish4 (RemovingEventAddress + address) address (NoData ()) world
+        static member removeEntityImmediate (address : Entity Address) entity world =
+            let world = World.publish4 () (RemovingEventAddress ->>- address) address world
             let (entity, world) = World.unregisterEntity address entity world
             let world = World.setOptEntityWithoutEvent address None world
             (entity, world)
@@ -229,24 +245,69 @@ module WorldEntityModule =
             let world = World.addTask task world
             (entity, world)
 
-        static member removeEntitiesImmediate groupAddress entities world =
-            World.transformSimulants World.removeEntityImmediate groupAddress entities world
+        static member removeEntitiesImmediate (groupAddress : Group Address) entities world =
+            World.transformSimulants World.removeEntityImmediate gatoea groupAddress entities world
 
-        static member removeEntities groupAddress entities world =
-            World.transformSimulants World.removeEntity groupAddress entities world
+        static member removeEntities (groupAddress : Group Address) entities world =
+            World.transformSimulants World.removeEntity gatoea groupAddress entities world
 
         static member addEntity address entity world =
-            let (entity, world) =
-                match World.getOptEntity address world with
-                | Some _ -> World.removeEntityImmediate address entity world
-                | None -> (entity, world)
-            let world = World.setEntityWithoutEvent address entity world
-            let (entity, world) = World.registerEntity address entity world
-            let world = World.publish4 (AddEventAddress + address) address (NoData ()) world
-            (entity, world)
+            if not <| World.containsEntity address world then
+                let (entity, world) =
+                    match World.getOptEntity address world with
+                    | Some _ -> World.removeEntityImmediate address entity world
+                    | None -> (entity, world)
+                let world = World.setEntityWithoutEvent address entity world
+                let (entity, world) = World.registerEntity address entity world
+                let world = World.publish4 () (AddEventAddress ->>- address) address world
+                (entity, world)
+            else failwith <| "Adding an entity that the world already contains at address '" + acstring address + "'."
 
-        static member addEntities groupAddress entities world =
-            World.transformSimulants World.addEntity groupAddress entities world
+        static member addEntities (groupAddress : Group Address) entities world =
+            World.transformSimulants World.addEntity gatoea groupAddress entities world
+
+        static member makeEntity dispatcherName optName world =
+            
+            // find the entity's dispatcher
+            let dispatcher = Map.find dispatcherName world.Components.EntityDispatchers
+            
+            // compute the opt overlay name
+            let intrinsicOverlayName = dispatcherName
+            let defaultOptOverlayName = Map.find intrinsicOverlayName world.State.OverlayRouter
+            
+            // make the bare entity with name as id
+            let entity = Entity.make dispatcher defaultOptOverlayName optName
+
+            // attach the entity's intrinsic facets and their fields
+            let entity = World.attachIntrinsicFacetsViaNames entity world
+            
+            // apply the entity's overlay to its facet names
+            let entity =
+                match defaultOptOverlayName with
+                | Some defaultOverlayName ->
+                    let overlayer = world.Subsystems.Overlayer
+                    Overlayer.applyOverlayToFacetNames intrinsicOverlayName defaultOverlayName entity overlayer overlayer
+                        
+                    // synchronize the entity's facets (and attach their fields)
+                    match World.trySynchronizeFacets [] None entity world with
+                    | Right (entity, _) -> entity
+                    | Left error -> debug error; entity
+                | None -> entity
+
+            // attach the entity's dispatcher fields
+            Reflection.attachFields dispatcher entity
+
+            // apply the entity's overlay
+            match entity.OptOverlayName with
+            | Some overlayName ->
+
+                // OPTIMIZATION: apply overlay only when it will change something (EG - when it's not the intrinsic overlay)
+                if intrinsicOverlayName <> overlayName then
+                    let facetNames = Entity.getFacetNames entity
+                    Overlayer.applyOverlay intrinsicOverlayName overlayName facetNames entity world.Subsystems.Overlayer
+                    entity
+                else entity
+            | None -> entity
 
         static member private tryGetFacet facetName world =
             match Map.tryFind facetName world.Components.Facets with
@@ -323,7 +384,7 @@ module WorldEntityModule =
         static member tryAddFacet syncing facetName optAddress (entity : Entity) world =
             match World.tryGetFacet facetName world with
             | Right facet ->
-                if Entity.isFacetCompatible facet entity then
+                if Entity.isFacetCompatible world.Components.EntityDispatchers facet entity then
                     let entity = { entity with FacetsNp = facet :: entity.FacetsNp }
                     Reflection.attachFields facet entity
                     let entity =
@@ -335,7 +396,7 @@ module WorldEntityModule =
                         let world = World.setEntity address entity world
                         Right (entity, world)
                     | None -> Right (entity, world)
-                else Left <| "Cannot add incompatible facet '" + Reflection.getTypeName facet + "'."
+                else Left <| "Facet '" + Reflection.getTypeName facet + "' is incompatible with entity '" + entity.Name + "'."
             | Left error -> Left error
 
         static member tryRemoveFacets syncing facetNamesToRemove optAddress entity world =
@@ -371,8 +432,9 @@ module WorldEntityModule =
             | Left _ as left -> left
 
         static member private attachIntrinsicFacetsViaNames (entity : Entity) world =
+            let components = world.Components
             let entity = { entity with Id = entity.Id } // hacky copy
-            Reflection.attachIntrinsicFacets entity.DispatcherNp entity world.Components.Facets
+            Reflection.attachIntrinsicFacets components.EntityDispatchers components.Facets entity.DispatcherNp entity
             entity
         
         static member internal handleBodyTransformMessage (message : BodyTransformMessage) address (entity : Entity) world =
@@ -387,20 +449,27 @@ module WorldEntityModule =
                 (entity, world)
             else (entity, world)
 
-        static member writeEntity overlayer (writer : XmlWriter) (entity : Entity) =
-            writer.WriteStartElement typeof<Entity>.Name
+        static member writeEntity (writer : XmlWriter) (entity : Entity) world =
             writer.WriteAttributeString (DispatcherNameAttributeName, (entity.DispatcherNp.GetType ()).Name)
-            Serialization.writePropertiesFromTarget 
-                (fun propertyName -> Overlayer.shouldPropertySerialize3 propertyName entity overlayer)
-                writer
-                entity
-            writer.WriteEndElement ()
+            let shouldWriteProperty = fun propertyName propertyType (propertyValue : obj) ->
+                if propertyName = "OptOverlayName" && propertyType = typeof<string option> then
+                    let defaultOptOverlayName = Map.find (Reflection.getTypeName entity.DispatcherNp) world.State.OverlayRouter
+                    defaultOptOverlayName <> (propertyValue :?> string option)
+                else
+                    let facetNames = Entity.getFacetNames entity
+                    Overlayer.shouldPropertySerialize5 facetNames propertyName propertyType entity world.Subsystems.Overlayer
+            Serialization.writePropertiesFromTarget shouldWriteProperty writer entity
 
-        static member writeEntities overlayer (writer : XmlWriter) (entities : Map<_, _>) =
-            writer.WriteStartElement EntitiesNodeName
-            for entityKvp in entities do
-                World.writeEntity overlayer writer entityKvp.Value
-            writer.WriteEndElement ()
+        static member writeEntities (writer : XmlWriter) entities world =
+            let entitiesSorted =
+                List.sortBy
+                    (fun (entity : Entity) -> entity.CreationTimeNp)
+                    (Map.toValueList entities)
+            let entitiesFiltered = List.filter (fun (entity : Entity) -> entity.Persistent) entitiesSorted
+            for entity in entitiesFiltered do
+                writer.WriteStartElement typeof<Entity>.Name
+                World.writeEntity writer entity world
+                writer.WriteEndElement ()
 
         static member readEntity (entityNode : XmlNode) defaultDispatcherName world =
 
@@ -415,23 +484,28 @@ module WorldEntityModule =
                     let dispatcher = Map.find dispatcherName world.Components.EntityDispatchers
                     (dispatcherName, dispatcher)
 
+            // compute the default overlay names
+            let intrinsicOverlayName = dispatcherName
+            let defaultOptOverlayName = Map.find intrinsicOverlayName world.State.OverlayRouter
+
             // make the bare entity with name as id
-            let entity = Entity.make dispatcherName dispatcher None
+            let entity = Entity.make dispatcher defaultOptOverlayName None
 
             // attach the entity's intrinsic facets and their fields
             let entity = World.attachIntrinsicFacetsViaNames entity world
 
-            // read the entity's overlay and apply it to its facet names
-            Serialization.readOptOverlayNameToTarget entityNode entity
-            match entity.OptOverlayName with
-            | Some overlayName ->
-                let defaultOptDispatcherName = Some typeof<EntityDispatcher>.Name
-                let overlayer = world.State.Overlayer
-                Overlayer.applyOverlayToFacetNames defaultOptDispatcherName overlayName entity overlayer overlayer
-            | None -> ()
+            // read the entity's overlay and apply it to its facet names if applicable
+            Serialization.tryReadOptOverlayNameToTarget entityNode entity
+            match (defaultOptOverlayName, entity.OptOverlayName) with
+            | (Some defaultOverlayName, Some overlayName) ->
+                let overlayer = world.Subsystems.Overlayer
+                Overlayer.applyOverlayToFacetNames defaultOverlayName overlayName entity overlayer overlayer
+            | (_, _) -> ()
 
-            // read the entity's facet names, synchronize its facets, and attach their fields
+            // read the entity's facet names
             Serialization.readFacetNamesToTarget entityNode entity
+            
+            // synchronize the entity's facets (and attach their fields)
             let entity =
                 match World.trySynchronizeFacets [] None entity world with
                 | Right (entity, _) -> entity
@@ -440,9 +514,15 @@ module WorldEntityModule =
             // attach the entity's dispatcher fields
             Reflection.attachFields dispatcher entity
 
-            // apply the entity's overlay
+            // attempt to apply the entity's overlay
             match entity.OptOverlayName with
-            | Some overlayName -> Overlayer.applyOverlay None overlayName entity world.State.Overlayer
+            | Some overlayName ->
+
+                // OPTIMIZATION: applying overlay only when it will change something (EG - when it's not the default overlay)
+                if intrinsicOverlayName <> overlayName then
+                    let facetNames = Entity.getFacetNames entity
+                    Overlayer.applyOverlay intrinsicOverlayName overlayName facetNames entity world.Subsystems.Overlayer
+                else ()
             | None -> ()
 
             // read the entity's properties
@@ -462,12 +542,3 @@ module WorldEntityModule =
                         Map.add entity.Name entity entities)
                     Map.empty
                     (enumerable entityNodes)
-
-        static member makeEntity dispatcherName optName world =
-            let dispatcher = Map.find dispatcherName world.Components.EntityDispatchers
-            let entity = Entity.make dispatcherName dispatcher optName
-            let entity = World.attachIntrinsicFacetsViaNames entity world
-            Reflection.attachFields dispatcher entity
-            match World.trySynchronizeFacets [] None entity world with
-            | Right (entity, _) -> entity
-            | Left error -> debug error; entity

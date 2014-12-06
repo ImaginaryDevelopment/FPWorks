@@ -14,12 +14,28 @@ module Miscellanea =
     /// No matter what you pass it, it returns true.
     let inline tautology _ = true
 
+    /// The tautology function with two arguments.
+    /// No matter what you pass it, it returns true.
+    let inline tautology2 _ _ = true
+
+    /// The tautology function with three arguments.
+    /// No matter what you pass it, it returns true.
+    let inline tautology3 _ _ _ = true
+
     /// The absurdity function.
     /// No matter what you pass it, it returns false.
     let inline absurdity _ = false
 
+    /// The absurdity function with two arguments.
+    /// No matter what you pass it, it returns false.
+    let inline absurdity2 _ _ = false
+
     /// Convert any value to an obj.
     let inline objectify x = x :> obj
+
+    /// Flip two function parameters.
+    /// TODO: curry and uncurry.
+    let inline flip f x y = f y x
 
     /// Convert any value to its type.
     let inline getType x = x.GetType ()
@@ -29,14 +45,6 @@ module Miscellanea =
 
     /// The invalid Id.
     let [<Literal>] InvalidId = 0L
-
-    /// Perform a formatted ToString operation on a formattable object.
-    let inline stringf (formattable : IFormattable) format =
-        formattable.ToString (format, null)
-
-    /// Perform a formatted ToString operation on a formattable object.
-    let inline stringfp (formattable : IFormattable) format formatProvider =
-        formattable.ToString (format, formatProvider)
 
     /// Apply a function recursively a number of times.
     let rec doTimes fn arg times =
@@ -67,8 +75,8 @@ module Miscellanea =
         ignore <| TypeDescriptor.AddAttributes (typeof<'t>, TypeConverterAttribute typeof<'c>)
 
     /// Short-hand for linq enumerable cast.
-    let enumerable =
-        System.Linq.Enumerable.Cast
+    let enumerable<'t> enumeratable =
+        System.Linq.Enumerable.Cast<'t> enumeratable
 
     /// Convert a couple of ints to a Guid value.
     /// It is the user's responsibility to ensure uniqueness when using the resulting Guids.
@@ -78,6 +86,9 @@ module Miscellanea =
 
     /// Sequences two functions like Haskell ($).
     let inline ( ^^ ) f g = f g
+
+    /// Sequences two functions like Haskell ($).
+    let inline ( ^| ) f g = f g
 
     /// Combine the contents of two maps, taking an item from the second map in the case of a key
     /// conflict.
@@ -103,3 +114,98 @@ module Miscellanea =
     /// Symbol alias for module names.
     /// Needed since we can't utter something like typeof<MyModule>.
     let Module = Symbol
+
+module Type =
+
+    /// Try to get an existing type with the given unqualified name. Time-intensive.
+    let TryGetTypeUnqualified name =
+        match Type.GetType name with
+        | null ->
+            let allAssemblies = AppDomain.CurrentDomain.GetAssemblies ()
+            let types =
+                Seq.choose
+                    (fun (assembly : Assembly) ->
+                        match assembly.GetType name with
+                        | null -> None
+                        | aType -> Some aType)
+                    allAssemblies
+            Seq.tryFind (fun _ -> true) types
+        | aType -> Some aType
+
+    /// Get an existing type with the given unqualified name. Time-intensive.
+    let GetTypeUnqualified name =
+        match TryGetTypeUnqualified name with
+        | Some aType -> aType
+        | None -> failwith <| "Could not find type with unqualified name '" + name + "'."
+
+    let GetPropertyByPreference (preference, properties) =
+        let optPreferred = Seq.tryFind preference properties
+        if Seq.isEmpty properties then null
+        else
+            match optPreferred with
+            | Some preferred -> preferred
+            | None -> Seq.head properties
+
+[<AutoOpen>]
+module TypeModule =
+
+    /// Type extension for Type.
+    type Type with
+
+        /// Try to get a custom type converter for the given type.
+        member this.TryGetCustomTypeConverter () =
+            // TODO: check for custom type converters in the TypeDescriptor attributes as well
+            let typeConverterAttributes = this.GetCustomAttributes<TypeConverterAttribute> ()
+            if not <| Seq.isEmpty typeConverterAttributes then
+                let typeConverterAttribute = Seq.head typeConverterAttributes
+                let typeConverterTypeName = typeConverterAttribute.ConverterTypeName
+                let typeConverterType = Type.GetType typeConverterTypeName
+                match typeConverterType.GetConstructor [|typeof<Type>|] with
+                | null -> Some <| (typeConverterType.GetConstructor [||]).Invoke [||]
+                | constructor1 -> Some <| constructor1.Invoke [|this|]
+            else None
+
+        member this.GetPropertyWritable propertyName =
+            let optProperty =
+                Seq.tryFind
+                    (fun (property : PropertyInfo) -> property.Name = propertyName && property.CanWrite)
+                    (this.GetProperties ())
+            match optProperty with
+            | Some property -> property
+            | None -> null
+
+        member this.GetProperties propertyName =
+            Seq.filter
+                (fun (property : PropertyInfo) -> property.Name = propertyName)
+                (this.GetProperties ())
+
+        member this.GetPropertiesWritable =
+            Seq.filter
+                (fun (property : PropertyInfo) -> property.CanWrite)
+                (this.GetProperties ())
+
+        member this.GetPropertiesWritable propertyName =
+            Seq.filter
+                (fun (property : PropertyInfo) -> property.Name = propertyName && property.CanWrite)
+                (this.GetProperties ())
+
+        member this.GetPropertyByPreference (preference, propertyName) =
+            let properties = this.GetProperties propertyName
+            Type.GetPropertyByPreference (preference, properties)
+
+        member this.GetPropertyPreferWritable propertyName =
+            this.GetPropertyByPreference ((fun (property : PropertyInfo) -> property.CanWrite), propertyName)
+
+        member this.GetPropertiesByPreference preference =
+            let propertiesGrouped =
+                Seq.groupBy
+                    (fun (property : PropertyInfo) -> property.Name)
+                    (this.GetProperties ())
+            let optProperties =
+                Seq.map
+                    (fun (_, properties) -> Type.GetPropertyByPreference (preference, properties))
+                    propertiesGrouped
+            Seq.filter (fun optProperty -> optProperty <> null) optProperties
+
+        member this.GetPropertiesPreferWritable () =
+            this.GetPropertiesByPreference (fun (property : PropertyInfo) -> property.CanWrite)

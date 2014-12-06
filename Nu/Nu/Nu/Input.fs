@@ -1,25 +1,23 @@
 ﻿namespace Nu
+open System
+open System.ComponentModel
 open OpenTK
 open SDL2
+open Prime
 open Nu
 
 [<AutoOpen>]
 module MouseButtonModule =
 
     /// Describes a mouse button.
-    type [<StructuralEquality; StructuralComparison>] MouseButton =
+    type MouseButton =
         | MouseLeft
         | MouseCenter
         | MouseRight
         | MouseX1
         | MouseX2
-        override this.ToString () =
-            match this with
-            | MouseLeft -> "Left"
-            | MouseCenter -> "Center"
-            | MouseRight -> "Right"
-            | MouseX1 -> "X1"
-            | MouseX2 -> "X2"
+        override this.ToString () = AlgebraicDescriptor.convertToString this
+        static member toEventName this = (acstring this).Substring "Mouse".Length
 
 [<RequireQualifiedAccess>]
 module MouseState =
@@ -52,10 +50,8 @@ module MouseState =
 
     /// Get the position of the mouse.
     let getPosition () =
-        let x = ref 0
-        let y = ref 0
-        ignore <| SDL.SDL_GetMouseState (x, y)
-        Vector2I (!x, !y)
+        let (_, x, y) = SDL.SDL_GetMouseState ()
+        Vector2i (x, y)
 
     /// Get the position of the mouse in floating-point coordinates.
     let getPositionF world =
@@ -67,7 +63,7 @@ module KeyboardState =
 
     /// Query that the given keyboard key is down.
     let isKeyDown scanCode =
-        let keyboardStatePtr = SDL.SDL_GetKeyboardState (ref 0)
+        let keyboardStatePtr = fst <| SDL.SDL_GetKeyboardState ()
         let keyboardStatePtr = NativeInterop.NativePtr.ofNativeInt keyboardStatePtr
         let state = NativeInterop.NativePtr.get<byte> keyboardStatePtr scanCode
         state = byte 1

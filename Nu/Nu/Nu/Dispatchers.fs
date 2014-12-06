@@ -6,6 +6,7 @@ open Prime
 open TiledSharp
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 
 [<AutoOpen>]
 module RigidBodyFacetModule =
@@ -34,19 +35,19 @@ module RigidBodyFacetModule =
         static member setCollisionCategories (value : string) (entity : Entity) = entity?CollisionCategories <- value
         member entity.CollisionMask = entity?CollisionMask : string
         static member setCollisionMask (value : string) (entity : Entity) = entity?CollisionMask <- value
-        member entity.CollisionExpression = entity?CollisionExpression : string
+        member entity.CollisionExpr = entity?CollisionExpr : string
         static member setCollisionExpr (value : string) (entity : Entity) = entity?CollisionExpr <- value
         member entity.IsBullet = entity?IsBullet : bool
         static member setIsBullet (value : bool) (entity : Entity) = entity?IsBullet <- value
         member entity.IsSensor = entity?IsSensor : bool
         static member setIsSensor (value : bool) (entity : Entity) = entity?IsSensor <- value
-        member entity.PhysicsId = PhysicsId (entity.Id, entity.MinorId)
+        member entity.PhysicsId = { SourceId = entity.Id; BodyId = entity.MinorId }
 
     type RigidBodyFacet () =
         inherit Facet ()
 
         static let getBodyShape (entity : Entity) =
-            Physics.evalCollisionExpression (entity.Size : Vector2) entity.CollisionExpression
+            Physics.evalCollisionExpr (entity.Size : Vector2) entity.CollisionExpr
 
         static member FieldDefinitions =
             [variable? MinorId <| fun () -> Core.makeId ()
@@ -60,13 +61,16 @@ module RigidBodyFacetModule =
              define? GravityScale 1.0f
              define? CollisionCategories "1"
              define? CollisionMask "*"
-             define? CollisionExpression "Box"
+             define? CollisionExpr "Box"
              define? IsBullet false
              define? IsSensor false]
 
         override facet.RegisterPhysics (address, entity, world) =
             let bodyProperties = 
-                { Shape = getBodyShape entity
+                { BodyId = entity.PhysicsId.BodyId
+                  Position = entity.Position + entity.Size * 0.5f
+                  Rotation = entity.Rotation
+                  Shape = getBodyShape entity
                   BodyType = entity.BodyType
                   Density = entity.Density
                   Friction = entity.Friction
@@ -79,9 +83,7 @@ module RigidBodyFacetModule =
                   CollisionMask = Physics.toCollisionCategories entity.CollisionMask
                   IsBullet = entity.IsBullet
                   IsSensor = entity.IsSensor }
-            let position = entity.Position + entity.Size * 0.5f
-            let rotation = entity.Rotation
-            World.createBody address entity.PhysicsId position rotation bodyProperties world
+            World.createBody address entity.Id bodyProperties world
 
         override facet.UnregisterPhysics (_, entity, world) =
             World.destroyBody entity.PhysicsId world
@@ -102,7 +104,7 @@ module SpriteFacetModule =
         inherit Facet ()
 
         static member FieldDefinitions =
-            [define? SpriteImage { ImageAssetName = "Image3"; PackageName = "Default"}]
+            [define? SpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image3" }]
 
         override facet.GetRenderDescriptors (entity : Entity, world) =
             if entity.Visible && Camera.inView3 entity.ViewType entity.Position entity.Size world.Camera then
@@ -120,8 +122,8 @@ module SpriteFacetModule =
             else []
 
         override facet.GetQuickSize (entity : Entity, world) =
-            let image = entity.SpriteImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag entity.SpriteImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -138,13 +140,13 @@ module AnimatedSpriteFacetModule =
         static member setTileRun (value : int) (entity : Entity) = entity?TileRun <- value
         member entity.TileSize = entity?TileSize : Vector2
         static member setTileSize (value : Vector2) (entity : Entity) = entity?TileSize <- value
-        member entity.AnimatedSpriteImage = entity?AnimatedSpriteImage : Image
+        member entity.AnimatedSpriteImage = entity?AnimatedSpriteImage : Image // TODO: be nice to rename this to AnimationSheet?
         static member setAnimatedSpriteImage (value : Image) (entity : Entity) = entity?AnimatedSpriteImage <- value
 
     type AnimatedSpriteFacet () =
         inherit Facet ()
 
-        static let getSpriteOptInset (entity : Entity) world =
+        static let getOptSpriteInset (entity : Entity) world =
             let tile = (int world.State.TickTime / entity.Stutter) % entity.TileCount
             let tileI = tile % entity.TileRun
             let tileJ = tile / entity.TileRun
@@ -158,7 +160,7 @@ module AnimatedSpriteFacetModule =
              define? TileCount 16 
              define? TileRun 4
              define? TileSize <| Vector2 (16.0f, 16.0f)
-             define? AnimatedSpriteImage { ImageAssetName = "Image7"; PackageName = "Default"}]
+             define? AnimatedSpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image7" }]
 
         override facet.GetRenderDescriptors (entity : Entity, world) =
             if entity.Visible && Camera.inView3 entity.ViewType entity.Position entity.Size world.Camera then
@@ -170,7 +172,7 @@ module AnimatedSpriteFacetModule =
                               Size = entity.Size
                               Rotation = entity.Rotation
                               ViewType = entity.ViewType
-                              OptInset = getSpriteOptInset entity world
+                              OptInset = getOptSpriteInset entity world
                               Image = entity.AnimatedSpriteImage
                               Color = Vector4.One }}]
             else []
@@ -179,39 +181,15 @@ module AnimatedSpriteFacetModule =
             entity.TileSize
 
 [<AutoOpen>]
-module UIFacetModule =
-
-    type Entity with
-        
-        member ui.Enabled = ui?Enabled : bool
-        static member setEnabled (value : bool) (ui : Entity) = ui?Enabled <- value
-
-    type UIFacet () =
-        inherit Facet ()
-        
-        static member FieldDefinitions =
-            [define? Enabled true
-             define? ViewType Absolute]
-
-[<AutoOpen>]
 module EntityDispatcherModule =
 
     type Entity with
     
-        static member private sortFstDesc (priority, _) (priority2, _) =
-            if priority = priority2 then 0
-            elif priority > priority2 then -1
-            else 1
-
-        static member mouseToEntity position world (entity : Entity) =
-            let positionScreen = Camera.mouseToScreen position world.Camera
-            let getView =
-                match entity.ViewType with
-                | Relative -> Camera.getViewRelativeF
-                | Absolute -> Camera.getViewAbsoluteF
-            let view = getView world.Camera
-            let positionEntity = positionScreen * view
-            positionEntity
+        // OPTIMIZATION: priority annotated as single to decrease GC pressure.
+        static member private sortFstDesc (priority : single, _) (priority2 : single, _) =
+            if priority > priority2 then -1
+            elif priority < priority2 then 1
+            else 0
 
         static member setPositionSnapped snap position (entity : Entity) =
             let snapped = Math.snap2F snap position
@@ -240,71 +218,108 @@ module EntityDispatcherModule =
             let entitiesSorted = Entity.pickingSort entities world
             List.tryFind
                 (fun entity ->
-                    let positionEntity = Entity.mouseToEntity position world entity
+                    let positionWorld = Camera.mouseToWorld entity.ViewType position world.Camera
                     let transform = Entity.getTransform entity
-                    let picked = Math.isPointInBounds3 positionEntity transform.Position transform.Size
+                    let picked = Math.isPointInBounds3 positionWorld transform.Position transform.Size
                     picked)
                 entitiesSorted
+
+[<AutoOpen>]
+module GuiDispatcherModule =
+
+    type Entity with
+        
+        member gui.Enabled = gui?Enabled : bool
+        static member setEnabled (value : bool) (gui : Entity) = gui?Enabled <- value
+        member gui.DisabledColor = gui?DisabledColor : Vector4
+        static member setDisabledColor (value : Vector4) (gui : Entity) = gui?DisabledColor <- value
+        member gui.SwallowMouseLeft = gui?SwallowMouseLeft : bool
+        static member setSwallowMouseLeft (value : bool) (gui : Entity) = gui?SwallowMouseLeft <- value
+
+    type GuiDispatcher () =
+        inherit EntityDispatcher ()
+
+        static let handleMouseLeft event world =
+            let (address, gui : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
+            let eventHandling =
+                if World.isAddressSelected address world && gui.Visible then
+                    let mousePositionWorld = Camera.mouseToWorld gui.ViewType mouseButtonData.Position world.Camera
+                    if gui.SwallowMouseLeft && Math.isPointInBounds3 mousePositionWorld gui.Position gui.Size then Resolve else Cascade
+                else Cascade
+            (eventHandling, world)
+        
+        static member FieldDefinitions =
+            [define? ViewType Absolute
+             define? Enabled true
+             define? DisabledColor <| Vector4 (0.667f, 0.667f, 0.667f, 1.0f)
+             define? SwallowMouseLeft true]
+
+        override dispatcher.Register (address, gui, world) =
+            let world =
+                world |>
+                World.monitor handleMouseLeft MouseLeftDownEventAddress address |>
+                World.monitor handleMouseLeft MouseLeftUpEventAddress address
+            (gui, world)
 
 [<AutoOpen>]
 module ButtonDispatcherModule =
 
     type Entity with
-
-        member button.IsDown = button?IsDown : bool
-        static member setIsDown (value : bool) (button : Entity) = button?IsDown <- value
+    
+        member button.Down = button?Down : bool
+        static member setDown (value : bool) (button : Entity) = button?Down <- value
         member button.UpImage = button?UpImage : Image
         static member setUpImage (value : Image) (button : Entity) = button?UpImage <- value
         member button.DownImage = button?DownImage : Image
         static member setDownImage (value : Image) (button : Entity) = button?DownImage <- value
-        member button.ClickSound = button?ClickSound : Sound
-        static member setClickSound (value : Sound) (button : Entity) = button?ClickSound <- value
+        member button.OptClickSound = button?OptClickSound : Sound option
+        static member setOptClickSound (value : Sound option) (button : Entity) = button?OptClickSound <- value
 
     type ButtonDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
 
-        let handleButtonEventDownMouseLeft event world =
-            let (address, button : Entity, mouseButtonData : MouseButtonData) = Event.unwrap event
+        let handleMouseLeftDown event world =
+            let (address, button : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
             if World.isAddressSelected address world && button.Enabled && button.Visible then
-                let mousePositionButton = Entity.mouseToEntity mouseButtonData.Position world button
-                if Math.isPointInBounds3 mousePositionButton button.Position button.Size then
-                    let button = Entity.setIsDown true button
+                let mousePositionWorld = Camera.mouseToWorld button.ViewType mouseButtonData.Position world.Camera
+                if Math.isPointInBounds3 mousePositionWorld button.Position button.Size then
+                    let button = Entity.setDown true button
                     let world = World.setEntity address button world
-                    let world = World.publish4 (DownEventAddress + address) address (NoData ()) world
+                    let world = World.publish4 () (DownEventAddress ->>- address) address world
                     (Resolve, world)
                 else (Cascade, world)
             else (Cascade, world)
 
-        let handleButtonEventUpMouseLeft event world =
-            let (address, button : Entity, mouseButtonData : MouseButtonData) = Event.unwrap event
+        let handleMouseLeftUp event world =
+            let (address, button : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
             if World.isAddressSelected address world && button.Enabled && button.Visible then
-                let mousePositionButton = Entity.mouseToEntity mouseButtonData.Position world button
+                let mousePositionWorld = Camera.mouseToWorld button.ViewType mouseButtonData.Position world.Camera
                 let world =
-                    let button = Entity.setIsDown false button
+                    let button = Entity.setDown false button
                     let world = World.setEntity address button world
-                    World.publish4 (UpEventAddress + address) address (NoData ()) world
-                if Math.isPointInBounds3 mousePositionButton button.Position button.Size && button.IsDown then
-                    let world = World.publish4 (ClickEventAddress + address) address (NoData ()) world
-                    let world = World.playSound button.ClickSound 1.0f world
+                    World.publish4 () (UpEventAddress ->>- address) address world
+                if Math.isPointInBounds3 mousePositionWorld button.Position button.Size && button.Down then
+                    let world = World.publish4 () (ClickEventAddress ->>- address) address world
+                    let world =
+                        match button.OptClickSound with
+                        | Some clickSound -> World.playSound 1.0f clickSound world
+                        | None -> world
                     (Resolve, world)
                 else (Cascade, world)
             else (Cascade, world)
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
-             define? IsDown false
-             define? UpImage { ImageAssetName = "Image"; PackageName = DefaultPackageName }
-             define? DownImage { ImageAssetName = "Image2"; PackageName = DefaultPackageName }
-             define? ClickSound { SoundAssetName = "Sound"; PackageName = DefaultPackageName }]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+            [define? SwallowMouseLeft false
+             define? Down false
+             define? UpImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image" }
+             define? DownImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image2" }
+             define? OptClickSound <| Some { SoundPackageName = DefaultPackageName; SoundAssetName = "Sound" }]
 
         override dispatcher.Register (address, button, world) =
             let world =
                 world |>
-                World.monitor DownMouseLeftEventAddress address handleButtonEventDownMouseLeft |>
-                World.monitor UpMouseLeftEventAddress address handleButtonEventUpMouseLeft
+                World.monitor handleMouseLeftDown MouseLeftDownEventAddress address |>
+                World.monitor handleMouseLeftUp MouseLeftUpEventAddress address
             (button, world)
 
         override dispatcher.GetRenderDescriptors (button, _) =
@@ -318,13 +333,13 @@ module ButtonDispatcherModule =
                               Rotation = 0.0f
                               ViewType = Absolute
                               OptInset = None
-                              Image = if button.IsDown then button.DownImage else button.UpImage
-                              Color = Vector4.One }}]
+                              Image = if button.Down then button.DownImage else button.UpImage
+                              Color = if button.Enabled then Vector4.One else button.DisabledColor }}]
             else []
 
         override dispatcher.GetQuickSize (button, world) =
-            let image = button.UpImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag button.UpImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -337,14 +352,11 @@ module LabelDispatcherModule =
         static member setLabelImage (value : Image) (label : Entity) = label?LabelImage <- value
 
     type LabelDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
-             define? LabelImage { ImageAssetName = "Image4"; PackageName = DefaultPackageName }]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+            [define? SwallowMouseLeft true
+             define? LabelImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image4" }]
 
         override dispatcher.GetRenderDescriptors (label, _) =
             if label.Visible then
@@ -358,12 +370,12 @@ module LabelDispatcherModule =
                               ViewType = Absolute
                               OptInset = None
                               Image = label.LabelImage
-                              Color = Vector4.One }}]
+                              Color = if label.Enabled then Vector4.One else label.DisabledColor }}]
             else []
 
         override dispatcher.GetQuickSize (label, world) =
-            let image = label.LabelImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag label.LabelImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -384,22 +396,29 @@ module TextDispatcherModule =
         static member setBackgroundImage (value : Image) (text : Entity) = text?BackgroundImage <- value
 
     type TextDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
+            [define? SwallowMouseLeft true
              define? Text String.Empty
-             define? TextFont { FontAssetName = "Font"; PackageName = DefaultPackageName }
+             define? TextFont { FontPackageName = DefaultPackageName; FontAssetName = "Font" }
              define? TextOffset Vector2.Zero
              define? TextColor Vector4.One
-             define? BackgroundImage { ImageAssetName = "Image4"; PackageName = DefaultPackageName }]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+             define? BackgroundImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image4" }]
 
         override dispatcher.GetRenderDescriptors (text, _) =
             if text.Visible then
                 [LayerableDescriptor
+                    { Depth = text.Depth
+                      LayeredDescriptor =
+                        TextDescriptor
+                            { Text = text.Text
+                              Position = (text.Position + text.TextOffset)
+                              Size = text.Size - text.TextOffset
+                              ViewType = Absolute
+                              Font = text.TextFont
+                              Color = text.TextColor }}
+                 LayerableDescriptor
                     { Depth = text.Depth
                       LayeredDescriptor =
                         SpriteDescriptor
@@ -409,22 +428,12 @@ module TextDispatcherModule =
                               ViewType = Absolute
                               OptInset = None
                               Image = text.BackgroundImage
-                              Color = Vector4.One }}
-                 LayerableDescriptor
-                    { Depth = text.Depth
-                      LayeredDescriptor =
-                        TextDescriptor
-                            { Text = text.Text
-                              Position = (text.Position + text.TextOffset)
-                              Size = text.Size - text.TextOffset
-                              ViewType = Absolute
-                              Font = text.TextFont
-                              Color = text.TextColor }}]
+                              Color = if text.Enabled then Vector4.One else text.DisabledColor }}]
             else []
 
         override dispatcher.GetQuickSize (text, world) =
-            let image = text.BackgroundImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag text.BackgroundImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -433,42 +442,45 @@ module ToggleDispatcherModule =
 
     type Entity with
 
-        member toggle.IsOn = toggle?IsOn : bool
-        static member setIsOn (value : bool) (toggle : Entity) = toggle?IsOn <- value
-        member toggle.IsPressed = toggle?IsPressed : bool
-        static member setIsPressed (value : bool) (toggle : Entity) = toggle?IsPressed <- value
+        member toggle.On = toggle?IsOn : bool
+        static member setOn (value : bool) (toggle : Entity) = toggle?On <- value
+        member toggle.Pressed = toggle?Pressed : bool
+        static member setPressed (value : bool) (toggle : Entity) = toggle?Pressed <- value
         member toggle.OffImage = toggle?OffImage : Image
         static member setOffImage (value : Image) (toggle : Entity) = toggle?OffImage <- value
         member toggle.OnImage = toggle?OnImage : Image
         static member setOnImage (value : Image) (toggle : Entity) = toggle?OnImage <- value
-        member toggle.ToggleSound = toggle?ToggleSound : Sound
-        static member setToggleSound (value : Sound) (toggle : Entity) = toggle?ToggleSound <- value
+        member toggle.OptToggleSound = toggle?OptToggleSound : Sound option
+        static member setOptToggleSound (value : Sound option) (toggle : Entity) = toggle?OptToggleSound <- value
 
     type ToggleDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
         
-        let handleToggleEventDownMouseLeft event world =
-            let (address, toggle : Entity, mouseButtonData : MouseButtonData) = Event.unwrap event
+        let handleMouseLeftDown event world =
+            let (address, toggle : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
             if World.isAddressSelected address world && toggle.Enabled && toggle.Visible then
-                let mousePositionToggle = Entity.mouseToEntity mouseButtonData.Position world toggle
-                if Math.isPointInBounds3 mousePositionToggle toggle.Position toggle.Size then
-                    let toggle = Entity.setIsPressed true toggle
+                let mousePositionWorld = Camera.mouseToWorld toggle.ViewType mouseButtonData.Position world.Camera
+                if Math.isPointInBounds3 mousePositionWorld toggle.Position toggle.Size then
+                    let toggle = Entity.setPressed true toggle
                     let world = World.setEntity address toggle world
                     (Resolve, world)
                 else (Cascade, world)
             else (Cascade, world)
-    
-        let handleToggleEventUpMouseLeft event world =
-            let (address, toggle : Entity, mouseButtonData : MouseButtonData) = Event.unwrap event
-            if World.isAddressSelected address world && toggle.Enabled && toggle.Visible && toggle.IsPressed then
-                let mousePositionToggle = Entity.mouseToEntity mouseButtonData.Position world toggle
-                let toggle = Entity.setIsPressed false toggle
-                if Math.isPointInBounds3 mousePositionToggle toggle.Position toggle.Size then
-                    let toggle = Entity.setIsOn (not toggle.IsOn) toggle
+
+        let handleMouseLeftUp event world =
+            let (address, toggle : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
+            if World.isAddressSelected address world && toggle.Enabled && toggle.Visible && toggle.Pressed then
+                let mousePositionWorld = Camera.mouseToWorld toggle.ViewType mouseButtonData.Position world.Camera
+                let toggle = Entity.setPressed false toggle
+                if Math.isPointInBounds3 mousePositionWorld toggle.Position toggle.Size then
+                    let toggle = Entity.setOn (not toggle.On) toggle
                     let world = World.setEntity address toggle world
-                    let eventAddress = if toggle.IsOn then OnEventAddress else OffEventAddress
-                    let world = World.publish4 (eventAddress + address) address (NoData ()) world
-                    let world = World.playSound toggle.ToggleSound 1.0f world
+                    let eventAddress = if toggle.On then OnEventAddress else OffEventAddress
+                    let world = World.publish4 () (eventAddress ->>- address) address world
+                    let world =
+                        match toggle.OptToggleSound with
+                        | Some toggleSound -> World.playSound 1.0f toggleSound world
+                        | None -> world
                     (Resolve, world)
                 else
                     let world = World.setEntity address toggle world
@@ -476,21 +488,18 @@ module ToggleDispatcherModule =
             else (Cascade, world)
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
-             define? IsOn false
-             define? IsPressed false
-             define? OffImage { ImageAssetName = "Image"; PackageName = DefaultPackageName }
-             define? OnImage { ImageAssetName = "Image2"; PackageName = DefaultPackageName }
-             define? ToggleSound { SoundAssetName = "Sound"; PackageName = DefaultPackageName }]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+            [define? SwallowMouseLeft false
+             define? On false
+             define? Pressed false
+             define? OffImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image" }
+             define? OnImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image2" }
+             define? ToggleSound { SoundPackageName = DefaultPackageName; SoundAssetName = "Sound" }]
 
         override dispatcher.Register (address, toggle, world) =
             let world =
                 world |>
-                World.monitor DownMouseLeftEventAddress address handleToggleEventDownMouseLeft |>
-                World.monitor UpMouseLeftEventAddress address handleToggleEventUpMouseLeft
+                World.monitor handleMouseLeftDown MouseLeftDownEventAddress address |>
+                World.monitor handleMouseLeftUp MouseLeftUpEventAddress address
             (toggle, world)
 
         override dispatcher.GetRenderDescriptors (toggle, _) =
@@ -504,13 +513,13 @@ module ToggleDispatcherModule =
                               Rotation = 0.0f
                               ViewType = Absolute
                               OptInset = None
-                              Image = if toggle.IsOn || toggle.IsPressed then toggle.OnImage else toggle.OffImage
-                              Color = Vector4.One }}]
+                              Image = if toggle.On || toggle.Pressed then toggle.OnImage else toggle.OffImage
+                              Color = if toggle.Enabled then Vector4.One else toggle.DisabledColor }}]
             else []
 
         override dispatcher.GetQuickSize (toggle, world) =
-            let image = toggle.OffImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag toggle.OffImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -519,45 +528,42 @@ module FeelerDispatcherModule =
 
     type Entity with
 
-        member feeler.IsTouched = feeler?IsTouched : bool
-        static member setIsTouched (value : bool) (feeler : Entity) = feeler?IsTouched <- value
+        member feeler.Touched = feeler?Touched : bool
+        static member setTouched (value : bool) (feeler : Entity) = feeler?Touched <- value
 
     type FeelerDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
 
-        let handleFeelerEventDownMouseLeft event world =
-            let (address, feeler : Entity, mouseButtonData : MouseButtonData) = Event.unwrap event
+        let handleMouseLeftDown event world =
+            let (address, feeler : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
             if World.isAddressSelected address world && feeler.Enabled && feeler.Visible then
-                let mousePositionFeeler = Entity.mouseToEntity mouseButtonData.Position world feeler
-                if Math.isPointInBounds3 mousePositionFeeler feeler.Position feeler.Size then
-                    let feeler = Entity.setIsTouched true feeler
+                let mousePositionWorld = Camera.mouseToWorld feeler.ViewType mouseButtonData.Position world.Camera
+                if Math.isPointInBounds3 mousePositionWorld feeler.Position feeler.Size then
+                    let feeler = Entity.setTouched true feeler
                     let world = World.setEntity address feeler world
-                    let world = World.publish4 (TouchEventAddress + address) address (MouseButtonData mouseButtonData) world
+                    let world = World.publish4 mouseButtonData.Position (TouchEventAddress ->>- address) address world
                     (Resolve, world)
                 else (Cascade, world)
             else (Cascade, world)
     
-        let handleFeelerEventUpMouseLeft event world =
-            let (address, feeler : Entity, _) = Event.unwrap event
+        let handleMouseLeftUp event world =
+            let (address, feeler : Entity, mouseButtonData : MouseButtonData) = World.unwrapASD event world
             if World.isAddressSelected address world && feeler.Enabled && feeler.Visible then
-                let feeler = Entity.setIsTouched false feeler
+                let feeler = Entity.setTouched false feeler
                 let world = World.setEntity address feeler world
-                let world = World.publish4 (ReleaseEventAddress + address) address (NoData ()) world
+                let world = World.publish4 mouseButtonData.Position (ReleaseEventAddress ->>- address) address world
                 (Resolve, world)
             else (Cascade, world)
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
-             define? IsTouched false]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+            [define? SwallowMouseLeft false
+             define? Touched false]
 
         override dispatcher.Register (address, feeler, world) =
             let world =
                 world |>
-                World.monitor DownMouseLeftEventAddress address handleFeelerEventDownMouseLeft |>
-                World.monitor UpMouseLeftEventAddress address handleFeelerEventUpMouseLeft
+                World.monitor handleMouseLeftDown MouseLeftDownEventAddress address |>
+                World.monitor handleMouseLeftUp MouseLeftUpEventAddress address
             (feeler, world)
 
         override dispatcher.GetQuickSize (_, _) =
@@ -578,7 +584,7 @@ module FillBarDispatcherModule =
         static member setBorderImage (value : Image) (fillBar : Entity) = fillBar?BorderImage <- value
 
     type FillBarDispatcher () =
-        inherit EntityDispatcher ()
+        inherit GuiDispatcher ()
         
         let getFillBarSpriteDims (fillBar : Entity) =
             let spriteInset = fillBar.Size * fillBar.FillInset * 0.5f
@@ -588,29 +594,16 @@ module FillBarDispatcherModule =
             (spritePosition, Vector2 (spriteWidth, spriteHeight))
 
         static member FieldDefinitions =
-            [define? ViewType Absolute // must override ViewType definition in EntityDispatcherdefine? Fill 0.0f
+            [define? SwallowMouseLeft true
+             define? Fill 0.0f
              define? FillInset 0.0f
-             define? FillImage { ImageAssetName = "Image9"; PackageName = DefaultPackageName }
-             define? BorderImage { ImageAssetName = "Image10"; PackageName = DefaultPackageName }]
-
-        static member IntrinsicFacetNames =
-            [typeof<UIFacet>.Name]
+             define? FillImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image9" }
+             define? BorderImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image10" }]
 
         override dispatcher.GetRenderDescriptors (fillBar, _) =
             if fillBar.Visible then
                 let (fillBarSpritePosition, fillBarSpriteSize) = getFillBarSpriteDims fillBar
                 [LayerableDescriptor
-                    { Depth = fillBar.Depth
-                      LayeredDescriptor =
-                        SpriteDescriptor
-                            { Position = fillBarSpritePosition
-                              Size = fillBarSpriteSize
-                              Rotation = 0.0f
-                              ViewType = Absolute
-                              OptInset = None
-                              Image = fillBar.FillImage
-                              Color = Vector4.One }}
-                 LayerableDescriptor
                     { Depth = fillBar.Depth
                       LayeredDescriptor =
                         SpriteDescriptor
@@ -620,12 +613,23 @@ module FillBarDispatcherModule =
                               ViewType = Absolute
                               OptInset = None
                               Image = fillBar.BorderImage
-                              Color = Vector4.One }}]
+                              Color = if fillBar.Enabled then Vector4.One else fillBar.DisabledColor }}
+                 LayerableDescriptor
+                    { Depth = fillBar.Depth
+                      LayeredDescriptor =
+                        SpriteDescriptor
+                            { Position = fillBarSpritePosition
+                              Size = fillBarSpriteSize
+                              Rotation = 0.0f
+                              ViewType = Absolute
+                              OptInset = None
+                              Image = fillBar.FillImage
+                              Color = if fillBar.Enabled then Vector4.One else fillBar.DisabledColor }}]
             else []
 
         override dispatcher.GetQuickSize (fillBar, world) =
-            let image = fillBar.BorderImage
-            match Metadata.tryGetTextureSizeAsVector2 image.ImageAssetName image.PackageName world.State.AssetMetadataMap with
+            let imageAssetTag = Image.toAssetTag fillBar.BorderImage
+            match Metadata.tryGetTextureSizeAsVector2 imageAssetTag world.State.AssetMetadataMap with
             | Some size -> size
             | None -> DefaultEntitySize
 
@@ -637,7 +641,7 @@ module BlockDispatcherModule =
 
         static member FieldDefinitions =
             [define? BodyType Static
-             define? SpriteImage { ImageAssetName = "Image3"; PackageName = DefaultPackageName }]
+             define? SpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image3" }]
 
         static member IntrinsicFacetNames =
             [typeof<RigidBodyFacet>.Name
@@ -650,40 +654,40 @@ module BoxDispatcherModule =
         inherit EntityDispatcher ()
 
         static member FieldDefinitions =
-            [define? SpriteImage { ImageAssetName = "Image3"; PackageName = DefaultPackageName }]
+            [define? SpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image3" }]
 
         static member IntrinsicFacetNames =
             [typeof<RigidBodyFacet>.Name
              typeof<SpriteFacet>.Name]
 
 [<AutoOpen>]
-module AvatarDispatcherModule =
+module TopViewCharacterDispatcherModule =
 
-    type AvatarDispatcher () =
+    type TopViewCharacterDispatcher () =
         inherit EntityDispatcher ()
 
         static member FieldDefinitions =
             [define? FixedRotation true
              define? LinearDamping 10.0f
              define? GravityScale 0.0f
-             define? CollisionExpression "Circle"
-             define? SpriteImage { ImageAssetName = "Image7"; PackageName = DefaultPackageName }]
+             define? CollisionExpr "Circle"
+             define? SpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image7" }]
         
         static member IntrinsicFacetNames =
             [typeof<RigidBodyFacet>.Name
              typeof<SpriteFacet>.Name]
 
 [<AutoOpen>]
-module CharacterDispatcherModule =
+module SideViewCharacterDispatcherModule =
 
-    type CharacterDispatcher () =
+    type SideViewCharacterDispatcher () =
         inherit EntityDispatcher ()
 
         static member FieldDefinitions =
             [define? FixedRotation true
              define? LinearDamping 3.0f
-             define? CollisionExpression "Capsule"
-             define? SpriteImage { ImageAssetName = "Image6"; PackageName = DefaultPackageName }]
+             define? CollisionExpr "Capsule"
+             define? SpriteImage { ImagePackageName = DefaultPackageName; ImageAssetName = "Image6" }]
 
         static member IntrinsicFacetNames =
             [typeof<RigidBodyFacet>.Name
@@ -699,17 +703,18 @@ module TileMapDispatcherModule =
         member entity.Parallax = entity?Parallax : single
         static member setParallax (value : single) (entity : Entity) = entity?Parallax <- value
 
-        static member makeTileMapData tileMapAsset world =
-            let (_, _, map) = Metadata.getTileMapMetadata tileMapAsset.TileMapAssetName tileMapAsset.PackageName world.State.AssetMetadataMap
-            let mapSize = Vector2I (map.Width, map.Height)
-            let tileSize = Vector2I (map.TileWidth, map.TileHeight)
+        static member makeTileMapData (tileMapAsset : TileMapAsset) world =
+            let tileMapAssetTag = TileMapAsset.toAssetTag tileMapAsset
+            let map = __c <| Metadata.getTileMapMetadata tileMapAssetTag world.State.AssetMetadataMap
+            let mapSize = Vector2i (map.Width, map.Height)
+            let tileSize = Vector2i (map.TileWidth, map.TileHeight)
             let tileSizeF = Vector2 (single tileSize.X, single tileSize.Y)
-            let tileMapSize = Vector2I (mapSize.X * tileSize.X, mapSize.Y * tileSize.Y)
+            let tileMapSize = Vector2i (mapSize.X * tileSize.X, mapSize.Y * tileSize.Y)
             let tileMapSizeF = Vector2 (single tileMapSize.X, single tileMapSize.Y)
             let tileSet = map.Tilesets.[0] // MAGIC_VALUE: I'm not sure how to properly specify this
             let optTileSetWidth = tileSet.Image.Width
             let optTileSetHeight = tileSet.Image.Height
-            let tileSetSize = Vector2I (optTileSetWidth.Value / tileSize.X, optTileSetHeight.Value / tileSize.Y)
+            let tileSetSize = Vector2i (optTileSetWidth.Value / tileSize.X, optTileSetHeight.Value / tileSize.Y)
             { Map = map; MapSize = mapSize; TileSize = tileSize; TileSizeF = tileSizeF; TileMapSize = tileMapSize; TileMapSizeF = tileMapSizeF; TileSet = tileSet; TileSetSize = tileSetSize }
 
         static member makeTileData (tileMap : Entity) tmd (tl : TmxLayer) tileIndex =
@@ -719,10 +724,10 @@ module TileMapDispatcherModule =
             let tile = tl.Tiles.[tileIndex]
             let gid = tile.Gid - tmd.TileSet.FirstGid
             let gidPosition = gid * tmd.TileSize.X
-            let gid2 = Vector2I (gid % tileSetRun, gid / tileSetRun)
+            let gid2 = Vector2i (gid % tileSetRun, gid / tileSetRun)
             let tileMapPosition = tileMap.Position
             let tilePosition =
-                Vector2I (
+                Vector2i (
                     int tileMapPosition.X + tmd.TileSize.X * i,
                     int tileMapPosition.Y - tmd.TileSize.Y * (j + 1)) // subtraction for right-handedness
             let optTileSetTile = Seq.tryFind (fun (item : TmxTilesetTile) -> tile.Gid - 1 = item.Id) tmd.TileSet.Tiles
@@ -731,55 +736,54 @@ module TileMapDispatcherModule =
     type TileMapDispatcher () =
         inherit EntityDispatcher ()
 
-        let getTilePhysicsId tmid (tli : int) (ti : int) =
-            PhysicsId (tmid, intsToGuid tli ti)
+        let getTileBodyProperties6 (tm : Entity) tmd tli td ti cexpr =
+            let tileShape = Physics.evalCollisionExpr (Vector2 (single tmd.TileSize.X, single tmd.TileSize.Y)) cexpr
+            { BodyId = intsToGuid tli ti
+              Position =
+                Vector2 (
+                    single <| td.TilePosition.X + tmd.TileSize.X / 2,
+                    single <| td.TilePosition.Y + tmd.TileSize.Y / 2 + tmd.TileMapSize.Y)
+              Rotation = tm.Rotation
+              Shape = tileShape
+              BodyType = BodyType.Static
+              Density = NormalDensity
+              Friction = tm.Friction
+              Restitution = tm.Restitution
+              FixedRotation = true
+              LinearDamping = 0.0f
+              AngularDamping = 0.0f
+              GravityScale = 0.0f
+              CollisionCategories = Physics.toCollisionCategories tm.CollisionCategories
+              CollisionMask = Physics.toCollisionCategories tm.CollisionMask
+              IsBullet = false
+              IsSensor = false }
 
-        let registerTilePhysicsShape address (tm : Entity) tmd tli td ti cexpr world =
-            let tileShape = Physics.evalCollisionExpression (Vector2 (single tmd.TileSize.X, single tmd.TileSize.Y)) cexpr
-            let physicsId = getTilePhysicsId tm.Id tli ti
-            let createBodyMessage =
-                CreateBodyMessage
-                    { EntityAddress = address
-                      PhysicsId = physicsId
-                      Position =
-                        Vector2 (
-                            single <| td.TilePosition.X + tmd.TileSize.X / 2,
-                            single <| td.TilePosition.Y + tmd.TileSize.Y / 2 + tmd.TileMapSize.Y)
-                      Rotation = tm.Rotation
-                      BodyProperties =
-                        { Shape = tileShape
-                          BodyType = BodyType.Static
-                          Density = tm.Density
-                          Friction = tm.Friction
-                          Restitution = tm.Restitution
-                          FixedRotation = true
-                          LinearDamping = 0.0f
-                          AngularDamping = 0.0f
-                          GravityScale = 0.0f
-                          CollisionCategories = Physics.toCollisionCategories tm.CollisionCategories
-                          CollisionMask = Physics.toCollisionCategories tm.CollisionMask
-                          IsBullet = false
-                          IsSensor = false }}
-            World.addPhysicsMessage createBodyMessage world
-
-        let registerTilePhysics tm tmd (tl : TmxLayer) tli address ti world _ =
+        let getTileBodyProperties tm tmd (tl : TmxLayer) tli ti =
             let td = Entity.makeTileData tm tmd tl ti
             match td.OptTileSetTile with
             | Some tileSetTile ->
-                let collisionProperty = ref Unchecked.defaultof<string>
-                if tileSetTile.Properties.TryGetValue (CollisionProperty, collisionProperty) then
-                    let collisionExpr = string collisionProperty.Value
-                    registerTilePhysicsShape address tm tmd tli td ti collisionExpr world
-                else world
-            | None -> world
+                match tileSetTile.Properties.TryGetValue CollisionProperty with
+                | (true, collisionProperty) ->
+                    let collisionExpr = acstring collisionProperty
+                    let tileBodyProperties = getTileBodyProperties6 tm tmd tli td ti collisionExpr
+                    Some tileBodyProperties
+                | (false, _) -> None
+            | None -> None
 
-        let registerTileLayerPhysics address tileMap tileMapData tileLayerIndex world (tileLayer : TmxLayer) =
+        let getTileLayerBodyPropertyList tileMap tileMapData tileLayerIndex (tileLayer : TmxLayer) =
             if tileLayer.Properties.ContainsKey CollisionProperty then
                 Seq.foldi
-                    (registerTilePhysics tileMap tileMapData tileLayer tileLayerIndex address)
-                    world
+                    (fun i bodyPropertyList _ ->
+                        match getTileBodyProperties tileMap tileMapData tileLayer tileLayerIndex i with
+                        | Some bodyProperties -> bodyProperties :: bodyPropertyList
+                        | None -> bodyPropertyList)
+                    []
                     tileLayer.Tiles
-            else world
+            else []
+        
+        let registerTileLayerPhysics address tileMap tileMapData tileLayerIndex world tileLayer =
+            let bodyPropertyList = getTileLayerBodyPropertyList tileMap tileMapData tileLayerIndex tileLayer
+            World.createBodies address tileMap.Id bodyPropertyList world
 
         let registerTileMapPhysics address (tileMap : Entity) world =
             let tileMapData = Entity.makeTileMapData tileMap.TileMapAsset world
@@ -788,35 +792,37 @@ module TileMapDispatcherModule =
                 world
                 tileMapData.Map.Layers
 
+        let getTileLayerPhysicsIds (tileMap : Entity) tileMapData tileLayer tileLayerIndex =
+            Seq.foldi
+                (fun tileIndex physicsIds _ ->
+                    let tileData = Entity.makeTileData tileMap tileMapData tileLayer tileIndex
+                    match tileData.OptTileSetTile with
+                    | Some tileSetTile ->
+                        if tileSetTile.Properties.ContainsKey CollisionProperty then
+                            let physicsId = { SourceId = tileMap.Id; BodyId = intsToGuid tileLayerIndex tileIndex }
+                            physicsId :: physicsIds
+                        else physicsIds
+                    | None -> physicsIds)
+                []
+                tileLayer.Tiles
+
         let unregisterTileMapPhysics (tileMap : Entity) world =
             let tileMapData = Entity.makeTileMapData tileMap.TileMapAsset world
             Seq.foldi
                 (fun tileLayerIndex world (tileLayer : TmxLayer) ->
                     if tileLayer.Properties.ContainsKey CollisionProperty then
-                        Seq.foldi
-                            (fun tileIndex world _ ->
-                                let tileData = Entity.makeTileData tileMap tileMapData tileLayer tileIndex
-                                match tileData.OptTileSetTile with
-                                | Some tileSetTile ->
-                                    if tileSetTile.Properties.ContainsKey CollisionProperty then
-                                        let physicsId = getTilePhysicsId tileMap.Id tileLayerIndex tileIndex
-                                        let destroyBodyMessage = DestroyBodyMessage { PhysicsId = physicsId }
-                                        World.addPhysicsMessage destroyBodyMessage world
-                                    else world
-                                | None -> world)
-                            world
-                            tileLayer.Tiles
+                        let physicsIds = getTileLayerPhysicsIds tileMap tileMapData tileLayer tileLayerIndex
+                        World.destroyBodies physicsIds world
                     else world)
                 world
                 tileMapData.Map.Layers
 
         static member FieldDefinitions =
-            [define? Density NormalDensity
-             define? Friction 0.0f
+            [define? Friction 0.0f
              define? Restitution 0.0f
              define? CollisionCategories "1"
              define? CollisionMask "*"
-             define? TileMapAsset { TileMapAssetName = "TileMap"; PackageName = DefaultPackageName }
+             define? TileMapAsset { TileMapPackageName = DefaultPackageName; TileMapAssetName = "TileMap" }
              define? Parallax 0.0f]
 
         override dispatcher.Register (address, tileMap, world) =
@@ -834,16 +840,19 @@ module TileMapDispatcherModule =
 
         override dispatcher.GetRenderDescriptors (tileMap, world) =
             if tileMap.Visible then
-                let tileMapAsset = tileMap.TileMapAsset
-                match Metadata.tryGetTileMapMetadata tileMapAsset.TileMapAssetName tileMapAsset.PackageName world.State.AssetMetadataMap with
+                let tileMapAssetTag = TileMapAsset.toAssetTag tileMap.TileMapAsset
+                match Metadata.tryGetTileMapMetadata tileMapAssetTag world.State.AssetMetadataMap with
                 | Some (_, images, map) ->
                     let layers = List.ofSeq map.Layers
-                    let tileSourceSize = Vector2I (map.TileWidth, map.TileHeight)
+                    let tileSourceSize = Vector2i (map.TileWidth, map.TileHeight)
                     let tileSize = Vector2 (single map.TileWidth, single map.TileHeight)
                     List.foldi
                         (fun i descriptors (layer : TmxLayer) ->
                             let depth = tileMap.Depth + single i * 2.0f // MAGIC_VALUE: assumption
-                            let parallaxTranslation = tileMap.Parallax * depth * -world.Camera.EyeCenter
+                            let parallaxTranslation =
+                                match tileMap.ViewType with
+                                | Absolute -> Vector2.Zero
+                                | Relative -> tileMap.Parallax * depth * -world.Camera.EyeCenter
                             let parallaxPosition = tileMap.Position + parallaxTranslation
                             let size = Vector2 (tileSize.X * single map.Width, tileSize.Y * single map.Height)
                             if Camera.inView3 tileMap.ViewType parallaxPosition size world.Camera then
@@ -855,8 +864,8 @@ module TileMapDispatcherModule =
                                                 { Position = parallaxPosition
                                                   Size = size
                                                   Rotation = tileMap.Rotation
-                                                  ViewType = Relative
-                                                  MapSize = Vector2I (map.Width, map.Height)
+                                                  ViewType = tileMap.ViewType
+                                                  MapSize = Vector2i (map.Width, map.Height)
                                                   Tiles = layer.Tiles
                                                   TileSourceSize = tileSourceSize
                                                   TileSize = tileSize
@@ -870,7 +879,7 @@ module TileMapDispatcherModule =
             else []
 
         override dispatcher.GetQuickSize (tileMap, world) =
-            let tileMapAsset = tileMap.TileMapAsset
-            match Metadata.tryGetTileMapMetadata tileMapAsset.TileMapAssetName tileMapAsset.PackageName world.State.AssetMetadataMap with
+            let tileMapAssetTag = TileMapAsset.toAssetTag tileMap.TileMapAsset
+            match Metadata.tryGetTileMapMetadata tileMapAssetTag world.State.AssetMetadataMap with
             | Some (_, _, map) -> Vector2 (single <| map.Width * map.TileWidth, single <| map.Height * map.TileHeight)
-            | None -> failwith "Unexpected match failure in Nu.World.TileMapDispatcher.GetQuickSize."
+            | None -> DefaultEntitySize

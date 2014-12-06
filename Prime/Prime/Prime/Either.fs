@@ -2,6 +2,9 @@
 // Copyright (C) Bryan Edds, 2012-2014.
 
 namespace Prime
+open System
+open System.ComponentModel
+open Prime
 
 [<AutoOpen>]
 module EitherModule =
@@ -11,10 +14,6 @@ module EitherModule =
     type Either<'l, 'r> =
         | Right of 'r
         | Left of 'l
-        override this.ToString () =
-            match this with
-            | Right r -> "Right(" + (r.ToString ()) + ")"
-            | Left l -> "Left(" + (l.ToString ()) + ")"
 
     /// Monadic bind.
     let inline (>>=) either fn =
@@ -49,13 +48,13 @@ module Either =
     /// The either monad.
     let either = EitherBuilder ()
 
-    /// Queries if the either is a Left value.
+    /// Query whether the either is a Left value.
     let isLeft either =
         match either with
         | Right _ -> false
         | Left _ -> true
     
-    /// Queries if the either is a Right value.
+    /// Query whether the either is a Right value.
     let isRight either =
         match either with
         | Right _ -> true

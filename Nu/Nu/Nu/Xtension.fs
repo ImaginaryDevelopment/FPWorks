@@ -20,15 +20,20 @@ module XtensionModule =
         member this.DefaultValue = defaultValue
         
     /// Describes an XField.
-    type XFieldDescriptor =
+    type [<StructuralEquality; NoComparison>] XFieldDescriptor =
         { FieldName : string
-          TypeName : string } // the .NET type name
+          FieldType : Type }
+
+    type [<StructuralEquality; NoComparison>] XField =
+        { FieldValue : obj
+          FieldType : Type }
 
     /// An indexible collection of XFields.
-    type XFields = Map<string, obj>
+    type XFields = Map<string, XField>
 
     /// Xtensions (and their supporting types) are a dynamic, functional, and semi-convenient way
     /// to implement dynamic fields.
+    /// TODO: use DebuggerTypeProxyAttribute to make xfields easier to browse in the debugger.
     type [<StructuralEquality; NoComparison>] Xtension =
         { XFields : XFields
           CanDefault : bool
@@ -43,38 +48,39 @@ module XtensionModule =
                 match defaultValueAttribute.DefaultValue with
                 | :? 'r as defaultValue -> defaultValue
                 | _ as defaultValue ->
-                    let converter = TypeDescriptor.GetConverter defaultFieldType
                     let defaultValueType = defaultValue.GetType ()
-                    if converter.CanConvertFrom defaultValueType then converter.ConvertFrom defaultValue :?> 'r
-                    else failwith <| "Cannot convert '" + string defaultValue + "' to type '" + defaultFieldType.Name + "'."
+                    let converter = AlgebraicConverter defaultValueType
+                    if converter.CanConvertFrom defaultFieldType
+                    then converter.ConvertFrom defaultValue :?> 'r
+                    else failwith <| "Cannot convert '" + acstring defaultValue + "' to type '" + defaultFieldType.Name + "'."
             | None -> Unchecked.defaultof<'r>
 
         /// Try to get the default value for a given xtension member, returning None when defaulting is disallowed.
         static member private tryGetDefaultValue (this : Xtension) memberName : 'r =
             if this.CanDefault then Xtension.getDefaultValue ()
-            else failwith <| "The Xtension field '" + memberName + "' does not exist and no default is permitted because CanDefault is false."
+            else failwith <| "Xtension field '" + memberName + "' does not exist and no default is permitted because CanDefault is false."
 
         /// The dynamic look-up operator for an Xtension.
         /// Example -   let parallax = entity?Parallax : single
         static member (?) (xtension, memberName) : 'r =
 
-                // check if dynamic member is an existing field
-                match Map.tryFind memberName xtension.XFields with
-                | Some field ->
-                    
-                    // return field directly if the return type matches, otherwise the default value for that type
-                    match field with
-                    | :? 'r as fieldValue -> fieldValue
-                    | _ -> Xtension.tryGetDefaultValue xtension memberName
+            // check if dynamic member is an existing field
+            match Map.tryFind memberName xtension.XFields with
+            | Some field ->
+                
+                // return field directly if the return type matches, otherwise the default value for that type
+                match field.FieldValue with
+                | :? 'r as fieldValue -> fieldValue
+                | _ -> failwith <| "Xtension field '" + memberName + "' of type '" + field.FieldType.Name + "' is not of the expected type '" + typeof<'r>.Name + "'."
 
-                | None ->
+            | None ->
 
-                    // presume we're looking for a field that doesn't exist, so try to get the default value
-                    Xtension.tryGetDefaultValue xtension memberName
+                // presume we're looking for a field that doesn't exist, so try to get the default value
+                Xtension.tryGetDefaultValue xtension memberName
 
         /// The dynamic assignment operator for an Xtension.
         /// Example - let entity = entity.Position <- Vector2 (4.0, 5.0).
-        static member (?<-) (xtension, fieldName, value) =
+        static member (?<-) (xtension, fieldName, value : 'a) =
     #if DEBUG
             // nop'ed outside of debug mode for efficiency
             // TODO: consider writing a 'Map.addDidContainKey' function to efficently add and return a
@@ -83,7 +89,7 @@ module XtensionModule =
             then failwith "Cannot add field to a sealed Xtension."
             else
     #endif
-                let xFields = Map.add fieldName (value :> obj) xtension.XFields
+                let xFields = Map.add fieldName { FieldValue = value :> obj; FieldType = typeof<'a> } xtension.XFields
                 { xtension with XFields = xFields }
 
 [<RequireQualifiedAccess>]

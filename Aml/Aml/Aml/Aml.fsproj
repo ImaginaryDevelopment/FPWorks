@@ -86,7 +86,7 @@
     <Compile Include="Writer.fs" />
     <Compile Include="Conversions.fs" />
     <Compile Include="Reader.fs" />
-    <Compile Include="EvaluatorPrims.fs" />
+    <Compile Include="EvaluatorPrimitives.fs" />
     <Compile Include="Evaluator.fs" />
     <Compile Include="Environment.fs" />
     <Compile Include="Repl.fs" />
@@ -97,10 +97,10 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FParsec">
-      <HintPath>..\..\FParsec\FParsec.dll</HintPath>
+      <HintPath>..\..\..\Prime\FParsec\FParsec.dll</HintPath>
     </Reference>
     <Reference Include="FParsecCS">
-      <HintPath>..\..\FParsec\FParsecCS.dll</HintPath>
+      <HintPath>..\..\..\Prime\FParsec\FParsecCS.dll</HintPath>
     </Reference>
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
       <Private>True</Private>

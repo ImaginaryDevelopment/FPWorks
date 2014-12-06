@@ -34,6 +34,15 @@ let fornone pred seq =
     let notPred = not << pred
     Seq.forall notPred seq
 
+/// A more tolerant and open-minded take.
+let tryTake (n : int) (s : _ seq) =
+    let e = s.GetEnumerator ()
+    let i = ref 0
+    seq {
+        while e.MoveNext () && !i < n do
+            i := !i + 1
+            yield e.Current }
+
 /// Implement a fold while fn results in Some.
 /// Implementation thanks to Tomas Petricek!
 let foldWhile fn initial input =
@@ -42,3 +51,9 @@ let foldWhile fn initial input =
         Seq.takeWhile Option.isSome |>
         Seq.last |>
         Option.get
+
+/// Check that a predicate passes for NO items in a sequence.
+let rec notExists pred seq =
+    match tryHead seq with
+    | Some head -> not <| pred head && notExists pred (Seq.skip 1 seq)
+    | None -> true

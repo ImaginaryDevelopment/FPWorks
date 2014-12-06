@@ -5,48 +5,52 @@ namespace OmniBlade
 open Prime
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 module OmniConstants =
 
     // misc constants
-    let UIPackageName = "UI"
+    let GuiPackageName = "Gui"
     let FieldFeelerName = "Feeler"
-    let FieldAvatarName = "Avatar"
+    let FieldCharacterName = "Character"
 
-    // asset constants
-    let GameSong = { SongAssetName = "Song"; PackageName = DefaultPackageName }
-
-    // transition constants
-    let IncomingTimeSplash = 60L
-    let IncomingTime = 20L
-    let IdlingTime = 60L
-    let OutgoingTimeSplash = 40L
-    let OutgoingTime = 30L
+    // dissolve constants
+    let DissolveData =
+        { IncomingTime = 20L
+          OutgoingTime = 30L
+          DissolveImage = DefaultDissolveImage }
 
     // splash constants
-    let SplashAddress = !* "Splash"
+    let SplashAddress = stoa<Screen> "Splash"
+    let SplashData =
+        { DissolveData = DissolveData
+          IdlingTime = 60L
+          SplashImage = { ImagePackageName = DefaultPackageName; ImageAssetName = "Image5" }}
+
+    // asset constants
+    let GameSong = { SongPackageName = DefaultPackageName; SongAssetName = "Song" }
 
     // title constants
-    let TitleAddress = !* "Title"
-    let TitleGroupFileName = "Assets/OmniBlade/Groups/Title.nugroup"
-    let ClickTitleNewGameEvent = !* "Click/Title/Group/NewGame"
-    let ClickTitleLoadGameEvent = !* "Click/Title/Group/LoadGame"
-    let ClickTitleCreditsEvent = !* "Click/Title/Group/Credits"
-    let ClickTitleExitEvent = !* "Click/Title/Group/Exit"
+    let TitleAddress = stoa<Screen> "Title"
+    let TitleGroupFilePath = "Assets/OmniBlade/Groups/Title.nugroup"
+    let ClickTitleNewGameEvent = stoa<unit> "Click/Title/Group/NewGame"
+    let ClickTitleLoadGameEvent = stoa<unit> "Click/Title/Group/LoadGame"
+    let ClickTitleCreditsEvent = stoa<unit> "Click/Title/Group/Credits"
+    let ClickTitleExitEvent = stoa<unit> "Click/Title/Group/Exit"
 
     // load game constants
-    let LoadGameAddress = !* "LoadGame"
-    let LoadGameGroupFileName = "Assets/OmniBlade/Groups/LoadGame.nugroup"
-    let ClickLoadGameBackEvent = !* "Click/LoadGame/Group/Back"
+    let LoadGameAddress = stoa<Screen> "LoadGame"
+    let LoadGameGroupFilePath = "Assets/OmniBlade/Groups/LoadGame.nugroup"
+    let ClickLoadGameBackEvent = stoa<unit> "Click/LoadGame/Group/Back"
 
     // credits constants
-    let CreditsAddress = !* "Credits"
-    let CreditsGroupFileName = "Assets/OmniBlade/Groups/Credits.nugroup"
-    let ClickCreditsBackEvent = !* "Click/Credits/Group/Back"
+    let CreditsAddress = stoa<Screen> "Credits"
+    let CreditsGroupFilePath = "Assets/OmniBlade/Groups/Credits.nugroup"
+    let ClickCreditsBackEvent = stoa<unit> "Click/Credits/Group/Back"
 
     // field constants
-    let FieldAddress = !* "Field"
-    let FieldGroupFileName = "Assets/OmniBlade/Groups/Field.nugroup"
-    let ClickFieldBackEvent = !* "Click/Field/Group/Back"
+    let FieldAddress = stoa<Screen> "Field"
+    let FieldGroupFilePath = "Assets/OmniBlade/Groups/Field.nugroup"
+    let ClickFieldBackEvent = stoa<unit> "Click/Field/Group/Back"
 
     // time constants
-    let TimeAddress = !* "Time"
+    let TimeAddress = stoa<Screen> "Time"

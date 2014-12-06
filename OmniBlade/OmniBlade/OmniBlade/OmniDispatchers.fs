@@ -4,6 +4,7 @@ open SDL2
 open Prime
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 open OmniBlade
 open OmniBlade.OmniConstants
 
@@ -16,33 +17,27 @@ module OmniDispatchersModule =
         inherit GroupDispatcher ()
 
         let adjustFieldCamera groupAddress world =
-            let avatarAddress = groupAddress @+ [FieldAvatarName]
-            let avatar = World.getEntity avatarAddress world
-            let camera = { world.Camera with EyeCenter = avatar.Position + avatar.Size * 0.5f }
+            let characterAddress = gatoea groupAddress FieldCharacterName
+            let character = World.getEntity characterAddress world
+            let camera = { world.Camera with EyeCenter = character.Position + character.Size * 0.5f }
             World.setCamera camera world
 
         let handleAdjustFieldCamera event world =
-            let address = Event.unwrapA event
+            let address = World.unwrapA event world
             (Cascade, adjustFieldCamera address world)
 
-        let handleKeyboardKeyDown event world : EventHandling*World = 
-            let keyboardKeyData = Event.unwrapD event
-            match (enum<SDL.SDL_Scancode> keyboardKeyData.ScanCode, keyboardKeyData.IsRepeat) with
-            | (SDL.SDL_Scancode.SDL_SCANCODE_ESCAPE, false) -> (* what goes here to trigger the back button? *) (Cascade, world)
-            | _ -> (Cascade, world)
-
-        let handleMoveFieldAvatar event world =
-            let address = Event.unwrapA event
-            let avatarAddress = address @+ [FieldAvatarName]
-            let feelerAddress = address @+ [FieldFeelerName]
-            let avatar = World.getEntity avatarAddress world
+        let handleMoveFieldCharacter event world =
+            let address = World.unwrapA event world
+            let characterAddress = gatoea address FieldCharacterName
+            let feelerAddress = gatoea address FieldFeelerName
+            let character = World.getEntity characterAddress world
             let feeler = World.getEntity feelerAddress world
-            if feeler.IsTouched then
+            if feeler.Touched then
                 let mousePosition = World.getMousePositionF world
-                let mousePositionEntity = Entity.mouseToEntity mousePosition world avatar
-                let avatarCenter = avatar.Position + avatar.Size * 0.5f
-                let impulseVector = (mousePositionEntity - avatarCenter) * 5.0f
-                let world = World.applyBodyLinearImpulse impulseVector avatar.PhysicsId world 
+                let mousePositionWorld = Camera.mouseToWorld character.ViewType mousePosition world.Camera
+                let characterCenter = character.Position + character.Size * 0.5f
+                let impulseVector = (mousePositionWorld - characterCenter) * 5.0f
+                let world = World.applyBodyLinearImpulse impulseVector character.PhysicsId world 
                 (Cascade, world)
             else
                 let impulses =
@@ -51,16 +46,15 @@ module OmniDispatchersModule =
                      (if World.isKeyboardKeyDown (int SDL.SDL_Scancode.SDL_SCANCODE_UP) world then Vector2 (0.0f, KeyboardMovementForce) else Vector2.Zero)
                      (if World.isKeyboardKeyDown (int SDL.SDL_Scancode.SDL_SCANCODE_DOWN) world then Vector2 (0.0f, -KeyboardMovementForce) else Vector2.Zero)]
                 let impulse = List.reduce add impulses
-                let world = World.applyBodyLinearImpulse impulse avatar.PhysicsId world 
+                let world = World.applyBodyLinearImpulse impulse character.PhysicsId world 
                 (Cascade, world)
 
-        override dispatcher.Register (address, avatar, world) =
-            let world = World.monitor TickEventAddress address handleMoveFieldAvatar world
-            let world = World.monitor TickEventAddress address handleAdjustFieldCamera world
+        override dispatcher.Register (address, character, world) =
+            let world = World.monitor handleMoveFieldCharacter TickEventAddress address world
+            let world = World.monitor handleAdjustFieldCamera TickEventAddress address world
             let world = World.addPhysicsMessage (SetGravityMessage Vector2.Zero) world
-            let world = World.monitor DownKeyboardKeyEventAddress address handleKeyboardKeyDown world
             let world = adjustFieldCamera address world
-            (avatar, world)
+            (character, world)
 
     type BattleGroupDispatcher () =
         inherit GroupDispatcher ()

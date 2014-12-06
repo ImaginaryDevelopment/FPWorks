@@ -11,20 +11,41 @@ open Nu.Constants
 module AudioModule =
 
     /// Describes a song asset.
-    type [<StructuralEquality; NoComparison; XDefaultValue (DefaultSongValue)>] Song =
-        { SongAssetName : string
-          PackageName : string }
+    type [<StructuralEquality; NoComparison; XDefaultValue (DefaultSongValue)>]
+        Song =
+        { SongPackageName : string
+          SongAssetName : string }
+        
+        /// Convert a song asset to an asset location.
+        static member toAssetTag song =
+            { PackageName = song.SongPackageName
+              AssetName = song.SongAssetName }
+        
+        /// Convert an asset location to a song asset.
+        static member fromAssetTag (assetTag : AssetTag) =
+            { SongPackageName = assetTag.PackageName
+              SongAssetName = assetTag.AssetName }
 
     /// Describes a sound asset.
     type [<StructuralEquality; NoComparison; XDefaultValue (DefaultSoundValue)>] Sound =
-        { SoundAssetName : string
-          PackageName : string }
+        { SoundPackageName : string
+          SoundAssetName : string }
+        
+        /// Convert a sound asset to an asset location.
+        static member toAssetTag sound =
+            { PackageName = sound.SoundPackageName
+              AssetName = sound.SoundAssetName }
+        
+        /// Convert an asset location to an image asset.
+        static member fromAssetTag (assetTag : AssetTag) =
+            { SoundPackageName = assetTag.PackageName
+              SoundAssetName = assetTag.AssetName }
 
     /// A message to the audio system to play a song.
     type [<StructuralEquality; NoComparison>] PlaySongMessage =
-        { Song : Song
+        { TimeToFadeOutSongMs : int
           Volume : single
-          TimeToFadeOutSongMs : int }
+          Song : Song }
 
     /// A message to the audio system to play a sound.
     type [<StructuralEquality; NoComparison>] PlaySoundMessage =
@@ -56,40 +77,6 @@ module AudioModule =
         | WavAsset of nativeint
         | OggAsset of nativeint
 
-    /// Converts Sound types.
-    type SoundTypeConverter () =
-        inherit TypeConverter ()
-        override this.CanConvertTo (_, destType) =
-            destType = typeof<string>
-        override this.ConvertTo (_, culture, source, _) =
-            let s = source :?> Sound
-            String.Format (culture, "{0};{1}", s.SoundAssetName, s.PackageName) :> obj
-        override this.CanConvertFrom (_, sourceType) =
-            sourceType = typeof<Sound> || sourceType = typeof<string>
-        override this.ConvertFrom (_, _, source) =
-            let sourceType = source.GetType ()
-            if sourceType = typeof<Sound> then source
-            else
-                let args = (source :?> string).Split ';'
-                { SoundAssetName = args.[0]; PackageName = args.[1] } :> obj
-
-    /// Converts Song types.
-    type SongTypeConverter () =
-        inherit TypeConverter ()
-        override this.CanConvertTo (_, destType) =
-            destType = typeof<string>
-        override this.ConvertTo (_, culture, source, _) =
-            let s = source :?> Song
-            String.Format (culture, "{0};{1}", s.SongAssetName, s.PackageName) :> obj
-        override this.CanConvertFrom (_, sourceType) =
-            sourceType = typeof<Song> || sourceType = typeof<string>
-        override this.ConvertFrom (_, _, source) =
-            let sourceType = source.GetType ()
-            if sourceType = typeof<Song> then source
-            else
-                let args = (source :?> string).Split ';'
-                { SongAssetName = args.[0]; PackageName = args.[1] } :> obj
-
     /// The audio player. Represents the audio system of Nu generally.
     type IAudioPlayer =
         /// 'Play' the audio system. Must be called once per frame.
@@ -102,36 +89,35 @@ module AudioModule =
               AudioAssetMap : AudioAsset AssetMap
               OptCurrentSong : PlaySongMessage option
               OptNextPlaySong : PlaySongMessage option
-              AssetGraphFileName : string }
+              AssetGraphFilePath : string }
 
         static member private haltSound () =
             ignore <| SDL_mixer.Mix_HaltMusic ()
-            let channelCount = ref 0
-            ignore <| SDL_mixer.Mix_QuerySpec (ref 0, ref 0us, channelCount)
-            for i in [0 .. !channelCount - 1] do
+            let (_, _, _, channelCount) =  SDL_mixer.Mix_QuerySpec ()
+            for i in [0 .. channelCount - 1] do
                 ignore <| SDL_mixer.Mix_HaltChannel i
     
         static member private tryLoadAudioAsset2 (asset : Asset) =
-            let extension = Path.GetExtension asset.FileName
+            let extension = Path.GetExtension asset.FilePath
             match extension with
             | ".wav" ->
-                let optWav = SDL_mixer.Mix_LoadWAV asset.FileName
-                if optWav <> IntPtr.Zero then Some (asset.Name, WavAsset optWav)
+                let optWav = SDL_mixer.Mix_LoadWAV asset.FilePath
+                if optWav <> IntPtr.Zero then Some (asset.AssetTag.AssetName, WavAsset optWav)
                 else
                     let errorMsg = SDL.SDL_GetError ()
-                    trace <| "Could not load wav '" + asset.FileName + "' due to '" + errorMsg + "'."
+                    trace <| "Could not load wav '" + asset.FilePath + "' due to '" + errorMsg + "'."
                     None
             | ".ogg" ->
-                let optOgg = SDL_mixer.Mix_LoadMUS asset.FileName
-                if optOgg <> IntPtr.Zero then Some (asset.Name, OggAsset optOgg)
+                let optOgg = SDL_mixer.Mix_LoadMUS asset.FilePath
+                if optOgg <> IntPtr.Zero then Some (asset.AssetTag.AssetName, OggAsset optOgg)
                 else
                     let errorMsg = SDL.SDL_GetError ()
-                    trace <| "Could not load ogg '" + asset.FileName + "' due to '" + errorMsg + "'."
+                    trace <| "Could not load ogg '" + asset.FilePath + "' due to '" + errorMsg + "'."
                     None
-            | _ -> trace <| "Could not load audio asset '" + string asset + "' due to unknown extension '" + extension + "'."; None
+            | _ -> trace <| "Could not load audio asset '" + acstring asset + "' due to unknown extension '" + extension + "'."; None
     
         static member private tryLoadAudioPackage packageName audioPlayer =
-            let optAssets = Assets.tryLoadAssetsFromPackage (Some AudioAssociation) packageName audioPlayer.AssetGraphFileName
+            let optAssets = Assets.tryLoadAssetsFromPackage true (Some AudioAssociation) packageName audioPlayer.AssetGraphFilePath
             match optAssets with
             | Right assets ->
                 let optAudioAssets = List.map AudioPlayer.tryLoadAudioAsset2 assets
@@ -145,29 +131,29 @@ module AudioModule =
                     let audioAssetMap = Map.ofSeq audioAssets
                     { audioPlayer with AudioAssetMap = Map.add packageName audioAssetMap audioPlayer.AudioAssetMap }
             | Left error ->
-                trace <| "HintAudioPackageUseMessage failed due unloadable assets '" + error + "' for '" + string (packageName, audioPlayer.AssetGraphFileName) + "'."
+                trace <| "HintAudioPackageUseMessage failed due unloadable assets '" + error + "' for '" + acstring (packageName, audioPlayer.AssetGraphFilePath) + "'."
                 audioPlayer
             
-        static member private tryLoadAudioAsset packageName assetName audioPlayer =
-            let optAssetMap = Map.tryFind packageName audioPlayer.AudioAssetMap
+        static member private tryLoadAudioAsset (assetTag : AssetTag) audioPlayer =
+            let optAssetMap = Map.tryFind assetTag.PackageName audioPlayer.AudioAssetMap
             let (audioPlayer, optAssetMap) =
                 match optAssetMap with
-                | Some _ -> (audioPlayer, Map.tryFind packageName audioPlayer.AudioAssetMap)
+                | Some _ -> (audioPlayer, Map.tryFind assetTag.PackageName audioPlayer.AudioAssetMap)
                 | None ->
-                    note <| "Loading audio package '" + packageName + "' for asset '" + assetName + "' on the fly."
-                    let audioPlayer = AudioPlayer.tryLoadAudioPackage packageName audioPlayer
-                    (audioPlayer, Map.tryFind packageName audioPlayer.AudioAssetMap)
-            (audioPlayer, Option.bind (fun assetMap -> Map.tryFind assetName assetMap) optAssetMap)
+                    note <| "Loading audio package '" + assetTag.PackageName + "' for asset '" + assetTag.AssetName + "' on the fly."
+                    let audioPlayer = AudioPlayer.tryLoadAudioPackage assetTag.PackageName audioPlayer
+                    (audioPlayer, Map.tryFind assetTag.PackageName audioPlayer.AudioAssetMap)
+            (audioPlayer, Option.bind (fun assetMap -> Map.tryFind assetTag.AssetName assetMap) optAssetMap)
     
         static member private playSong playSongMessage audioPlayer =
-            let song = playSongMessage.Song
-            let (audioPlayer', optAudioAsset) = AudioPlayer.tryLoadAudioAsset song.PackageName song.SongAssetName audioPlayer
+            let songAssetTag = Song.toAssetTag playSongMessage.Song
+            let (audioPlayer', optAudioAsset) = AudioPlayer.tryLoadAudioAsset songAssetTag audioPlayer
             match optAudioAsset with
-            | Some (WavAsset _) -> note <| "Cannot play wav file as song '" + string song + "'."
+            | Some (WavAsset _) -> note <| "Cannot play wav file as song '" + acstring songAssetTag + "'."
             | Some (OggAsset oggAsset) ->
                 ignore <| SDL_mixer.Mix_VolumeMusic (int <| playSongMessage.Volume * single SDL_mixer.MIX_MAX_VOLUME)
                 ignore <| SDL_mixer.Mix_PlayMusic (oggAsset, -1)
-            | None -> note <| "PlaySongMessage failed due to unloadable assets for '" + string song + "'."
+            | None -> note <| "PlaySongMessage failed due to unloadable assets for '" + acstring songAssetTag + "'."
             { audioPlayer' with OptCurrentSong = Some playSongMessage }
     
         static member private handleHintAudioPackageUse (hintPackageUse : HintAudioPackageUseMessage) audioPlayer =
@@ -189,14 +175,14 @@ module AudioModule =
             | None -> audioPlayer
     
         static member private handlePlaySound playSoundMessage audioPlayer =
-            let sound = playSoundMessage.Sound
-            let (audioPlayer, optAudioAsset) = AudioPlayer.tryLoadAudioAsset sound.PackageName sound.SoundAssetName audioPlayer
+            let soundAssetTag = Sound.toAssetTag playSoundMessage.Sound
+            let (audioPlayer, optAudioAsset) = AudioPlayer.tryLoadAudioAsset soundAssetTag audioPlayer
             match optAudioAsset with
             | Some (WavAsset wavAsset) ->
                 ignore <| SDL_mixer.Mix_VolumeChunk (wavAsset, int <| playSoundMessage.Volume * single SDL_mixer.MIX_MAX_VOLUME)
                 ignore <| SDL_mixer.Mix_PlayChannel (-1, wavAsset, 0)
-            | Some (OggAsset _) -> note <| "Cannot play ogg file as sound '" + string sound + "'."
-            | None -> note <| "PlaySoundMessage failed due to unloadable assets for '" + string sound + "'."
+            | Some (OggAsset _) -> note <| "Cannot play ogg file as sound '" + acstring soundAssetTag + "'."
+            | None -> note <| "PlaySoundMessage failed due to unloadable assets for '" + acstring soundAssetTag + "'."
             audioPlayer
     
         static member private handlePlaySong playSongMessage audioPlayer =
@@ -264,13 +250,13 @@ module AudioModule =
                 AudioPlayer.tryUpdateNextSong
     
         /// Make an AudioPlayer.
-        static member make assetGraphFileName =
+        static member make assetGraphFilePath =
             let audioPlayer =
                 { AudioContext = ()
                   AudioAssetMap = Map.empty
                   OptCurrentSong = None
                   OptNextPlaySong = None
-                  AssetGraphFileName = assetGraphFileName }
+                  AssetGraphFilePath = assetGraphFilePath }
             audioPlayer :> IAudioPlayer
 
         interface IAudioPlayer with
@@ -285,11 +271,3 @@ module AudioModule =
         { MockAudioPlayer : unit }
         interface IAudioPlayer with
             member audioPlayer.Play _ = audioPlayer :> IAudioPlayer
-
-[<RequireQualifiedAccess>]
-module Audio = 
-
-    /// Initializes the type converters found in AudioModule.
-    let initTypeConverters () =
-        assignTypeConverter<Sound, SoundTypeConverter> ()
-        assignTypeConverter<Song, SongTypeConverter> ()

@@ -6,7 +6,7 @@ module List
 open System
 open System.Collections.Generic
 
-// TODO: for speed, implement List functions _without_ using Seq functions.
+// TODO: for speed, use new F# 4.0 List functions that are implemented _without_ Seq functions!
 
 /// The missing cons function.
 let cons = Prime.Sectioning.cons
@@ -23,11 +23,7 @@ let inline at index (list : 'a list) =
 
 /// Check that a predicate passes for NO items in a list.
 let rec notExists pred list =
-    match list with
-    | [] -> true
-    | head :: tail ->
-        if pred head then false
-        else notExists pred tail
+    Seq.notExists pred list
 
 let rec private subpartitionPlus fnOptU list left right =
     match list with
@@ -128,7 +124,7 @@ let rec roll roller state (list : 'a list) =
 
 /// Windowed for lists.
 let windowed count (list : 'a list) =
-    List.ofSeq (Seq.windowed count list)
+    List.ofSeq <| Seq.windowed count list
 
 /// Zip two lists by a function.
 /// TODO: optimize with program fusion.
@@ -197,6 +193,7 @@ let distinctBy by list =
     List.ofSeq results
 
 /// Get the last item from a list.
+/// TODO: speed this up with a single iteration?
 let last list =
     let length = List.length list
     List.nth list (length - 1)

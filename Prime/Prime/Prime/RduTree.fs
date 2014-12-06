@@ -7,7 +7,8 @@ namespace Prime
 module RduTreeModule =
 
     /// A tree onto which arbitrary recursive discriminated unions can be projected.
-    [<CompilationRepresentation(CompilationRepresentationFlags.UseNullAsTrueValue)>]
+    /// TODO: implement TypeConverter.
+    [<CompilationRepresentation (CompilationRepresentationFlags.UseNullAsTrueValue)>]
     type 'a RduTree =
         | Leaf
         | Branch of 'a * 'a RduTree list

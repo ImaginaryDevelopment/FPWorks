@@ -15,26 +15,37 @@ open TiledSharp
 open Prime
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 
 [<AutoOpen>]
 module WorldModule =
 
-    type World with
-
-        static member handleAsSwallow _ (world : World) =
-            (Resolve, world)
-
-        static member handleAsExit _ (world : World) =
-            (Resolve, World.exit world)
-
-    let private ScreenTransitionDownMouseKey = World.makeSubscriptionKey ()
-    let private ScreenTransitionUpMouseKey = World.makeSubscriptionKey ()
-    let private ScreenTransitionDownKeyboardKeyKey = World.makeSubscriptionKey ()
-    let private ScreenTransitionUpKeyboardKeyKey = World.makeSubscriptionKey ()
+    let private ScreenTransitionMouseLeftKey = World.makeSubscriptionKey ()
+    let private ScreenTransitionMouseCenterKey = World.makeSubscriptionKey ()
+    let private ScreenTransitionMouseRightKey = World.makeSubscriptionKey ()
+    let private ScreenTransitionMouseX1Key = World.makeSubscriptionKey ()
+    let private ScreenTransitionMouseX2Key = World.makeSubscriptionKey ()
+    let private ScreenTransitionKeyboardKeyKey = World.makeSubscriptionKey ()
     let private SplashScreenTickKey = World.makeSubscriptionKey ()
-    let private AnyEventAddressesCache = Dictionary<Address, Address list> HashIdentity.Structural
+    let private LoadedAssemblies = Dictionary<string, Assembly> ()
 
     type World with
+
+        static member getSimulantDefinition (address : Simulant Address) world =
+            match address.Names with
+            | [] -> Game <| world.Game
+            | [_] -> Screen <| World.getScreen (atosa address) world
+            | [_; _] -> Group <| World.getGroup (atoga address) world
+            | [_; _; _] -> Entity <| World.getEntity (atoea address) world
+            | _ -> failwith <| "Invalid simulant address '" + acstring address + "'."
+
+        static member getOptSimulantDefinition address world =
+            match address.Names with
+            | [] -> Some <| Game world.Game
+            | [_] -> Option.map Screen <| World.getOptScreen (atosa address) world
+            | [_; _] -> Option.map Group <| World.getOptGroup (atoga address) world
+            | [_; _; _] -> Option.map Entity <| World.getOptEntity (atoea address) world
+            | _ -> failwith <| "Invalid simulant address '" + acstring address + "'."
 
         static member tryGetIsSelectedScreenIdling world =
             match World.getOptSelectedScreen world with
@@ -58,22 +69,31 @@ module WorldModule =
                 match state with
                 | IdlingState ->
                     world |>
-                        World.unsubscribe ScreenTransitionDownMouseKey |>
-                        World.unsubscribe ScreenTransitionUpMouseKey |>
-                        World.unsubscribe ScreenTransitionDownKeyboardKeyKey |>
-                        World.unsubscribe ScreenTransitionUpKeyboardKeyKey
+                        World.unsubscribe ScreenTransitionMouseLeftKey |>
+                        World.unsubscribe ScreenTransitionMouseCenterKey |>
+                        World.unsubscribe ScreenTransitionMouseRightKey |>
+                        World.unsubscribe ScreenTransitionMouseX1Key |>
+                        World.unsubscribe ScreenTransitionMouseX2Key |>
+                        World.unsubscribe ScreenTransitionKeyboardKeyKey
                 | IncomingState | OutgoingState ->
                     world |>
-                        World.subscribe ScreenTransitionDownMouseKey (DownMouseEventAddress + AnyEventAddress) address World.handleAsSwallow |>
-                        World.subscribe ScreenTransitionUpMouseKey (UpMouseEventAddress + AnyEventAddress) address World.handleAsSwallow |>
-                        World.subscribe ScreenTransitionDownKeyboardKeyKey (DownKeyboardKeyEventAddress + AnyEventAddress) address World.handleAsSwallow |>
-                        World.subscribe ScreenTransitionUpKeyboardKeyKey (UpKeyboardKeyEventAddress + AnyEventAddress) address World.handleAsSwallow
+                        World.subscribe ScreenTransitionMouseLeftKey World.handleAsSwallow (MouseLeftEventAddress ->- AnyEventAddress) GameAddress |>
+                        World.subscribe ScreenTransitionMouseCenterKey World.handleAsSwallow (MouseCenterEventAddress ->- AnyEventAddress) GameAddress |>
+                        World.subscribe ScreenTransitionMouseRightKey World.handleAsSwallow (MouseRightEventAddress ->- AnyEventAddress) GameAddress |>
+                        World.subscribe ScreenTransitionMouseX1Key World.handleAsSwallow (MouseX1EventAddress ->- AnyEventAddress) GameAddress |>
+                        World.subscribe ScreenTransitionMouseX2Key World.handleAsSwallow (MouseX2EventAddress ->- AnyEventAddress) GameAddress |>
+                        World.subscribe ScreenTransitionKeyboardKeyKey World.handleAsSwallow (KeyboardKeyEventAddress ->- AnyEventAddress) GameAddress 
             let world = World.setScreen address screen world
             (screen, world)
 
-        static member selectScreen address screen world =
-            let (screen, world) = World.setScreenState IncomingState address screen world
-            let world = World.setOptSelectedScreenAddress (Some address) world
+        static member selectScreen screenAddress screen world =
+            let world =
+                match World.getOptSelectedScreenAddress world with
+                | Some selectedScreenAddress ->  World.publish4 () (DeselectEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
+                | None -> world
+            let (screen, world) = World.setScreenState IncomingState screenAddress screen world
+            let world = World.setOptSelectedScreenAddress (Some screenAddress) world
+            let world = World.publish4 () (SelectEventAddress ->>- screenAddress) screenAddress world
             (screen, world)
 
         static member tryTransitionScreen destinationAddress destinationScreen world =
@@ -82,281 +102,99 @@ module WorldModule =
                 match World.getOptScreen selectedScreenAddress world with
                 | Some selectedScreen ->
                     let subscriptionKey = World.makeSubscriptionKey ()
-                    let subscription = fun _ world ->
-                        let world = World.unsubscribe subscriptionKey world
-                        let world = snd <| World.selectScreen destinationAddress destinationScreen world
-                        (Cascade, world)
+                    let subscription = fun (_ : unit Event) world ->
+                        match world.State.OptScreenTransitionDestinationAddress with
+                        | Some address ->
+                            let world = World.unsubscribe subscriptionKey world
+                            let world = World.setOptScreenTransitionDestinationAddress None world
+                            let world = snd <| World.selectScreen address destinationScreen world
+                            (Cascade, world)
+                        | None -> failwith "No valid OptScreenTransitionDestinationAddress during screen transition!"
+                    let world = World.setOptScreenTransitionDestinationAddress (Some destinationAddress) world
                     let world = snd <| World.setScreenState OutgoingState selectedScreenAddress selectedScreen world
-                    let world = World.subscribe subscriptionKey (FinishOutgoingEventAddress + selectedScreenAddress) selectedScreenAddress subscription world
+                    let world = World.subscribe<unit, Screen> subscriptionKey subscription (OutgoingFinishEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
                     Some world
                 | None -> None
             | None -> None
 
-        static member handleAsScreenTransitionFromSplash destinationAddress _ world =
+        // TODO: replace this with more sophisticated use of handleAsScreenTransition4, and so on for its brethren.
+        static member private handleAsScreenTransitionFromSplash4<'d> eventHandling destinationAddress (_ : 'd Event) world =
             let destinationScreen = World.getScreen destinationAddress world
             let world = snd <| World.selectScreen destinationAddress destinationScreen world
-            (Cascade, world)
+            (eventHandling, world)
 
-        static member handleAsScreenTransition destinationAddress _ world =
+        static member handleAsScreenTransitionFromSplash<'d> destinationAddress event world =
+            World.handleAsScreenTransitionFromSplash4<'d> Cascade destinationAddress event world
+
+        static member handleAsScreenTransitionFromSplashBy<'d> by destinationAddress event  (world : World) =
+            let (eventHandling, world) = by event world
+            World.handleAsScreenTransitionFromSplash4<'d> eventHandling destinationAddress event world
+
+        static member private handleAsScreenTransition4<'d> eventHandling destinationAddress (_ : 'd Event) world =
             let destinationScreen = World.getScreen destinationAddress world
             match World.tryTransitionScreen destinationAddress destinationScreen world with
-            | Some world -> (Cascade, world)
+            | Some world -> (eventHandling, world)
             | None ->
-                trace <| "Program Error: Invalid screen transition for destination address '" + string destinationAddress + "'."
-                (Cascade, world)
+                trace <| "Program Error: Invalid screen transition for destination address '" + acstring destinationAddress + "'."
+                (eventHandling, world)
 
-        // OPTIMIZATION: priority annotated as single to decrease GC pressure.
-        static member private sortFstDesc (priority : single, _) (priority2 : single, _) =
-            if priority = priority2 then 0
-            elif priority > priority2 then -1
-            else 1
+        static member handleAsScreenTransition<'d> destinationAddress event world =
+            World.handleAsScreenTransition4<'d> Cascade destinationAddress event world
 
-        static member getSimulant address world =
-            match address.AddrList with
-            | [] -> Game <| world.Game
-            | [_] -> Screen <| World.getScreen address world
-            | [_; _] -> Group <| World.getGroup address world
-            | [_; _; _] -> Entity <| World.getEntity address world
-            | _ -> failwith <| "Invalid simulant address '" + string address + "'."
+        static member handleAsScreenTransitionBy<'d> by destinationAddress event (world : World) =
+            let (eventHandling, world) = by event world
+            World.handleAsScreenTransition4<'d> eventHandling destinationAddress event world
 
-        static member getOptSimulant address world =
-            match address.AddrList with
-            | [] -> Some <| Game world.Game
-            | [_] -> Option.map Screen <| World.getOptScreen address world
-            | [_; _] -> Option.map Group <| World.getOptGroup address world
-            | [_; _; _] -> Option.map Entity <| World.getOptEntity address world
-            | _ -> failwith <| "Invalid simulant address '" + string address + "'."
-
-        static member private getPublishingPriority getEntityPublishingPriority simulant world =
-            match simulant with
-            | Game _ -> GamePublishingPriority
-            | Screen _ -> ScreenPublishingPriority
-            | Group _ -> GroupPublishingPriority
-            | Entity entity -> getEntityPublishingPriority entity world
-
-        static member private getSubscriptions getEntityPublishingPriority subscriptions world =
-            List.fold
-                (fun subscriptions (key, address, subscription) ->
-                    match World.getOptSimulant address world with
-                    | Some simulant ->
-                        let priority = World.getPublishingPriority getEntityPublishingPriority simulant world
-                        let subscription = (priority, (key, address, subscription))
-                        subscription :: subscriptions
-                    | None -> subscriptions)
-                []
-                subscriptions
-
-        static member sortSubscriptionsBy getEntityPublishingPriority (subscriptions : SubscriptionEntry list) world =
-            let subscriptions = World.getSubscriptions getEntityPublishingPriority subscriptions world
-            let subscriptions = List.sortWith World.sortFstDesc subscriptions
-            List.map snd subscriptions
-
-        static member sortSubscriptionsByPickingPriority subscriptions world =
-            World.sortSubscriptionsBy
-                (fun (entity : Entity) world -> Entity.getPickingPriority entity world)
-                subscriptions
-                world
-
-        static member sortSubscriptionsByHierarchy (subscriptions : SubscriptionEntry list) world =
-            World.sortSubscriptionsBy
-                (fun _ _ -> EntityPublishingPriority)
-                subscriptions
-                world
-
-        // OPTIMIZATION: uses memoization.
-        static member private getAnyEventAddresses eventAddress =
-            if not <| Address.isEmpty eventAddress then
-                let anyEventAddressesKey = Address.allButLast eventAddress
-                let refAnyEventAddresses = ref Unchecked.defaultof<Address list>
-                if not <| AnyEventAddressesCache.TryGetValue (anyEventAddressesKey, refAnyEventAddresses) then
-                    let eventAddressList = eventAddress.AddrList
-                    let anyEventAddressList = AnyEventAddress.AddrList
-                    let anyEventAddresses =
-                        [for i in 0 .. List.length eventAddressList - 1 do
-                            let subNameList = List.take i eventAddressList @ anyEventAddressList
-                            yield Address.make subNameList]
-                    AnyEventAddressesCache.Add (anyEventAddressesKey, anyEventAddresses)
-                    anyEventAddresses
-                else !refAnyEventAddresses
-            else failwith "Event name cannot be empty."
-
-        static member private getSubscriptionsSorted publishSorter eventAddress world =
-            let anyEventAddresses = World.getAnyEventAddresses eventAddress
-            let optSubLists = List.map (fun anyEventAddress -> Map.tryFind anyEventAddress world.Callbacks.Subscriptions) anyEventAddresses
-            let optSubLists = Map.tryFind eventAddress world.Callbacks.Subscriptions :: optSubLists
-            let subLists = List.definitize optSubLists
-            let subList = List.concat subLists
-            publishSorter subList world
-
-        /// Publish an event.
-        static member private publishDefinition publishSorter eventAddress publisherAddress eventData world =
-            let subscriptions = World.getSubscriptionsSorted publishSorter eventAddress world
-            let (_, world) =
-                List.foldWhile
-                    (fun (eventHandling, world) (_, subscriberAddress, subscription) ->
-                        match World.getOptSimulant subscriberAddress world with
-                        | Some subscriber ->
-                            let event =
-                                { Address = eventAddress
-                                  SubscriberAddress = subscriberAddress
-                                  Subscriber = subscriber
-                                  PublisherAddress = publisherAddress
-                                  OptPublisher = World.getOptSimulant publisherAddress world
-                                  Data = eventData }
-                            if  (match eventHandling with Cascade -> true | Resolve -> false) &&
-                                (match world.State.Liveness with Running -> true | Exiting -> false) then
-                                let result = subscription event world
-                                Some result
-                            else None
-                        | None -> Some (Cascade, world))
-                    (Cascade, world)
-                    subscriptions
-            world
-
-        /// Publish an event.
-        static member private publish4Definition eventAddress publisherAddress eventData world =
-            World.publish World.sortSubscriptionsByHierarchy eventAddress publisherAddress eventData world
-
-        /// Subscribe to an event.
-        static member private subscribeDefinition subscriptionKey eventAddress subscriberAddress subscription world =
-            if not <| Address.isEmpty eventAddress then
-                let subscriptions =
-                    let subscriptionEntry = (subscriptionKey, subscriberAddress, subscription)
-                    match Map.tryFind eventAddress world.Callbacks.Subscriptions with
-                    | Some subscriptionEntries -> Map.add eventAddress (subscriptionEntry :: subscriptionEntries) world.Callbacks.Subscriptions
-                    | None -> Map.add eventAddress [subscriptionEntry] world.Callbacks.Subscriptions
-                let unsubscriptions = Map.add subscriptionKey (eventAddress, subscriberAddress) world.Callbacks.Unsubscriptions
-                let callbacks = { world.Callbacks with Subscriptions = subscriptions; Unsubscriptions = unsubscriptions }
-                { world with Callbacks = callbacks }
-            else failwith "Event name cannot be empty."
-
-        /// Subscribe to an event.
-        static member private subscribe4Definition eventAddress subscriberAddress subscription world =
-            World.subscribe (World.makeSubscriptionKey ()) eventAddress subscriberAddress subscription world
-
-        /// Unsubscribe from an event.
-        static member private unsubscribeDefinition subscriptionKey world =
-            match Map.tryFind subscriptionKey world.Callbacks.Unsubscriptions with
-            | Some (eventAddress, subscriberAddress) ->
-                match Map.tryFind eventAddress world.Callbacks.Subscriptions with
-                | Some subscriptionList ->
-                    let subscriptionList =
-                        List.remove
-                            (fun (subscriptionKey', subscriberAddress', _) ->
-                                subscriptionKey' = subscriptionKey &&
-                                subscriberAddress' = subscriberAddress)
-                            subscriptionList
-                    let subscriptions = 
-                        match subscriptionList with
-                        | [] -> Map.remove eventAddress world.Callbacks.Subscriptions
-                        | _ -> Map.add eventAddress subscriptionList world.Callbacks.Subscriptions
-                    let unsubscriptions = Map.remove subscriptionKey world.Callbacks.Unsubscriptions
-                    let callbacks = { world.Callbacks with Subscriptions = subscriptions; Unsubscriptions = unsubscriptions }
-                    { world with Callbacks = callbacks }
-                | None -> world // TODO: consider failure signal
-            | None -> world // TODO: consider failure signal
-
-        /// Keep active a subscription for the duration of a procedure.
-        static member private withSubscriptionDefinition eventAddress subscriberAddress subscription procedure world =
-            let subscriptionKey = World.makeSubscriptionKey ()
-            let world = World.subscribe subscriptionKey eventAddress subscriberAddress subscription world
-            let world = procedure world
-            World.unsubscribe subscriptionKey world
-
-        /// Keep active a subscription for the lifetime of a simulant.
-        static member private monitorDefinition eventAddress subscriberAddress subscription world =
-            if not <| Address.isEmpty subscriberAddress then
-                let observationKey = World.makeSubscriptionKey ()
-                let removalKey = World.makeSubscriptionKey ()
-                let world = World.subscribe observationKey eventAddress subscriberAddress subscription world
-                let subscription = fun _ world ->
-                    let world = World.unsubscribe removalKey world
-                    let world = World.unsubscribe observationKey world
-                    (Cascade, world)
-                World.subscribe removalKey (RemovingEventAddress + subscriberAddress) subscriberAddress subscription world
-            else failwith "Cannot monitor events with an anonymous subscriber."
-
-        static member saveGroupToFile group entities fileName world =
-            use file = File.Open (fileName, FileMode.Create)
-            let writerSettings = XmlWriterSettings ()
-            writerSettings.Indent <- true
-            // NOTE: XmlWriter can also write to an XmlDocument / XmlNode instance by using
-            // XmlWriter.Create <| (document.CreateNavigator ()).AppendChild ()
-            use writer = XmlWriter.Create (file, writerSettings)
-            writer.WriteStartDocument ()
-            writer.WriteStartElement RootNodeName
-            World.writeGroup world.State.Overlayer writer group entities
-            writer.WriteEndElement ()
-            writer.WriteEndDocument ()
-
-        static member loadGroupFromFile fileName world =
-            let document = XmlDocument ()
-            document.Load (fileName : string)
-            let rootNode = document.[RootNodeName]
-            let groupNode = rootNode.[GroupNodeName]
-            World.readGroup groupNode typeof<GroupDispatcher>.Name typeof<EntityDispatcher>.Name world
-
-        static member private updateTransition1 (transition : Transition) =
-            if transition.TransitionTicks = transition.TransitionLifetime then (true, { transition with TransitionTicks = 0L })
-            else (false, { transition with TransitionTicks = transition.TransitionTicks + 1L })
+        static member private updateScreenTransition1 screen transition =
+            if screen.TransitionTicksNp = transition.TransitionLifetime then (true, { screen with TransitionTicksNp = 0L })
+            else (false, { screen with TransitionTicksNp = screen.TransitionTicksNp + 1L })
 
         // TODO: split this function up...
-        static member private updateTransition handleUpdate world =
-            let world =
-                match World.getOptSelectedScreenAddress world with
-                | Some selectedScreenAddress ->
-                    let selectedScreen = World.getScreen selectedScreenAddress world
-                    match selectedScreen.ScreenState with
-                    | IncomingState ->
+        static member private updateScreenTransition world =
+            match World.getOptSelectedScreenAddress world with
+            | Some selectedScreenAddress ->
+                let selectedScreen = World.getScreen selectedScreenAddress world
+                match selectedScreen.ScreenStateNp with
+                | IncomingState ->
+                    match world.State.Liveness with
+                    | Running ->
                         let world =
-                            if selectedScreen.Incoming.TransitionTicks = 0L
-                            then World.publish4 (SelectEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
+                            if selectedScreen.TransitionTicksNp = 0L
+                            then World.publish4 () (IncomingStartEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
                             else world
                         match world.State.Liveness with
                         | Running ->
-                            let world =
-                                if selectedScreen.Incoming.TransitionTicks = 0L
-                                then World.publish4 (StartIncomingEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
-                                else world
-                            match world.State.Liveness with
-                            | Running ->
-                                let (finished, incoming) = World.updateTransition1 selectedScreen.Incoming
-                                let selectedScreen = Screen.setIncoming incoming selectedScreen
-                                let world = World.setScreen selectedScreenAddress selectedScreen world
-                                if finished then
-                                    let world = snd <| World.setScreenState IdlingState selectedScreenAddress selectedScreen world
-                                    World.publish4 (FinishIncomingEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
-                                else world
-                            | Exiting -> world
-                        | Exiting -> world
-                    | OutgoingState ->
-                        let world =
-                            if selectedScreen.Outgoing.TransitionTicks <> 0L then world
-                            else World.publish4 (StartOutgoingEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
-                        match world.State.Liveness with
-                        | Running ->
-                            let (finished, outgoing) = World.updateTransition1 selectedScreen.Outgoing
-                            let selectedScreen = Screen.setOutgoing outgoing selectedScreen
+                            let (finished, selectedScreen) = World.updateScreenTransition1 selectedScreen selectedScreen.Incoming
                             let world = World.setScreen selectedScreenAddress selectedScreen world
                             if finished then
                                 let world = snd <| World.setScreenState IdlingState selectedScreenAddress selectedScreen world
-                                let world = World.publish4 (DeselectEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
-                                match world.State.Liveness with
-                                | Running -> World.publish4 (FinishOutgoingEventAddress + selectedScreenAddress) selectedScreenAddress (NoData ()) world
-                                | Exiting -> world
+                                World.publish4 () (IncomingFinishEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
                             else world
                         | Exiting -> world
-                    | IdlingState -> world
-                | None -> world
-            match world.State.Liveness with
-            | Running -> handleUpdate world
-            | Exiting -> world
+                    | Exiting -> world
+                | OutgoingState ->
+                    let world =
+                        if selectedScreen.TransitionTicksNp <> 0L then world
+                        else World.publish4 () (OutgoingStartEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
+                    match world.State.Liveness with
+                    | Running ->
+                        let (finished, selectedScreen) = World.updateScreenTransition1 selectedScreen selectedScreen.Outgoing
+                        let world = World.setScreen selectedScreenAddress selectedScreen world
+                        if finished then
+                            let world = snd <| World.setScreenState IdlingState selectedScreenAddress selectedScreen world
+                            match world.State.Liveness with
+                            | Running -> World.publish4 () (OutgoingFinishEventAddress ->>- selectedScreenAddress) selectedScreenAddress world
+                            | Exiting -> world
+                        else world
+                    | Exiting -> world
+                | IdlingState -> world
+            | None -> world
 
         static member private handleSplashScreenIdleTick idlingTime ticks event world =
             let world = World.unsubscribe SplashScreenTickKey world
             if ticks < idlingTime then
                 let subscription = World.handleSplashScreenIdleTick idlingTime (inc ticks)
-                let world = World.subscribe SplashScreenTickKey event.Address event.SubscriberAddress subscription world
+                let world = World.subscribe SplashScreenTickKey subscription event.EventAddress event.SubscriberAddress world
                 (Cascade, world)
             else
                 match World.getOptSelectedScreenAddress world with
@@ -373,57 +211,63 @@ module WorldModule =
                     (Resolve, World.exit world)
 
         static member internal handleSplashScreenIdle idlingTime event world =
-            let subscription = World.handleSplashScreenIdleTick idlingTime 0L
-            let world = World.subscribe SplashScreenTickKey TickEventAddress event.SubscriberAddress subscription world
+            let world = World.subscribe SplashScreenTickKey (World.handleSplashScreenIdleTick idlingTime 0L) TickEventAddress event.SubscriberAddress world
             (Resolve, world)
 
-        static member addSplashScreenFromData destination address screenDispatcherName incomingTime idlingTime outgoingTime image world =
-            let splashScreen = World.makeDissolveScreen screenDispatcherName (Some <| Address.head address) incomingTime outgoingTime world
-            let splashGroup = World.makeGroup typeof<GroupDispatcher>.Name (Some "SplashGroup") world
-            let splashLabel = World.makeEntity typeof<LabelDispatcher>.Name (Some "SplashLabel") world
+        static member addSplashScreen persistent splashData dispatcherName address destination world =
+            let splashScreen = { World.makeDissolveScreen splashData.DissolveData dispatcherName (Some <| Address.head address) world with Persistent = persistent }
+            let splashGroup = { World.makeGroup typeof<GroupDispatcher>.Name (Some "SplashGroup") world with Persistent = persistent }
+            let splashLabel = { World.makeEntity typeof<LabelDispatcher>.Name (Some "SplashLabel") world with Persistent = persistent }
             let splashLabel = Entity.setSize world.Camera.EyeSize splashLabel
             let splashLabel = Entity.setPosition (-world.Camera.EyeSize * 0.5f) splashLabel
-            let splashLabel = Entity.setLabelImage image splashLabel
-            let splashGroupDescriptors = Map.singleton splashGroup.Name (splashGroup, Map.singleton splashLabel.Name splashLabel)
-            let world = snd <| World.addScreen address splashScreen splashGroupDescriptors world
-            let world = World.monitor (FinishIncomingEventAddress + address) address (World.handleSplashScreenIdle idlingTime) world
-            let world = World.monitor (FinishOutgoingEventAddress + address) address (World.handleAsScreenTransitionFromSplash destination) world
+            let splashLabel = Entity.setLabelImage splashData.SplashImage splashLabel
+            let splashGroupHierarchies = Map.singleton splashGroup.Name (splashGroup, Map.singleton splashLabel.Name splashLabel)
+            let splashScreenHierarchy = (splashScreen, splashGroupHierarchies)
+            let world = snd <| World.addScreen address splashScreenHierarchy world
+            let world = World.monitor (World.handleSplashScreenIdle splashData.IdlingTime) (IncomingFinishEventAddress ->>- address) address world
+            let world = World.monitor (World.handleAsScreenTransitionFromSplash destination) (OutgoingFinishEventAddress ->>- address) address world
             (splashScreen, world)
 
-        static member addDissolveScreenFromFile screenDispatcherName groupFileName incomingTime outgoingTime screenAddress world =
-            let dissolveScreen = World.makeDissolveScreen screenDispatcherName (Some <| Address.head screenAddress) incomingTime outgoingTime world
-            let (group, entities) = World.loadGroupFromFile groupFileName world
-            let dissolveGroupDescriptors = Map.singleton group.Name (group, entities)
-            World.addScreen screenAddress dissolveScreen dissolveGroupDescriptors world
+        static member addDissolveScreen persistent dissolveData dispatcherName address world =
+            let dissolveScreen = { World.makeDissolveScreen dissolveData dispatcherName (Some <| Address.head address) world with Persistent = persistent }
+            let dissolveScreenHierarchy = (dissolveScreen, Map.empty)
+            World.addScreen address dissolveScreenHierarchy world
 
-        static member private createIntrinsicOverlays dispatchers facets =
+        static member addDissolveScreenFromGroupFile persistent dissolveData dispatcherName address groupFilePath world =
+            let dissolveScreen = { World.makeDissolveScreen dissolveData dispatcherName (Some <| Address.head address) world with Persistent = persistent }
+            let (group, entities) = World.readGroupHierarchyFromFile groupFilePath world
+            let dissolveGroupHierarchies = Map.singleton group.Name (group, entities)
+            let dissolveScreenHierarchy = (dissolveScreen, dissolveGroupHierarchies)
+            World.addScreen address dissolveScreenHierarchy world
 
-            let hasFacetNamesField = fun sourceType ->
-                sourceType = typeof<EntityDispatcher>
-
-            let usesFacets = fun sourceType ->
-                sourceType = typeof<EntityDispatcher> ||
-                sourceType.IsSubclassOf typeof<EntityDispatcher>
-
-            let dispatchers = Map.toValueList dispatchers
+        static member private createIntrinsicOverlays entityDispatchers facets =
+            let hasFacetNamesField = fun sourceType -> sourceType = typeof<EntityDispatcher>
+            let entityDispatchers = Map.toValueListBy objectify entityDispatchers
             let facets = Map.toValueListBy (fun facet -> facet :> obj) facets
-            let sources = facets @ dispatchers
+            let sources = facets @ entityDispatchers
             let sourceTypes = List.map (fun source -> source.GetType ()) sources
-            Reflection.createIntrinsicOverlays hasFacetNamesField usesFacets sourceTypes
+            Reflection.createIntrinsicOverlays hasFacetNamesField sourceTypes
 
-        static member tryReloadOverlays inputDir outputDir world =
+        static member tryReloadOverlays inputDirectory outputDirectory world =
             
             // try to reload overlay file
-            let inputOverlayFileName = Path.Combine (inputDir, world.State.OverlayFileName)
-            let outputOverlayFileName = Path.Combine (outputDir, world.State.OverlayFileName)
-            try File.Copy (inputOverlayFileName, outputOverlayFileName, true)
+            let inputOverlayFilePath = Path.Combine (inputDirectory, world.State.OverlayFilePath)
+            let outputOverlayFilePath = Path.Combine (outputDirectory, world.State.OverlayFilePath)
+            try File.Copy (inputOverlayFilePath, outputOverlayFilePath, true)
 
                 // cache old overlayer and make new one
-                let oldOverlayer = world.State.Overlayer
-                let dispatchers = World.getDispatchers world
-                let intrinsicOverlays = World.createIntrinsicOverlays dispatchers world.Components.Facets
-                let overlayer = Overlayer.make outputOverlayFileName intrinsicOverlays
+                let oldOverlayer = world.Subsystems.Overlayer
+                let intrinsicOverlays = World.createIntrinsicOverlays world.Components.EntityDispatchers world.Components.Facets
+                let overlayer = Overlayer.make outputOverlayFilePath intrinsicOverlays
                 let world = World.setOverlayer overlayer world
+
+                // get all the entities in the world
+                let entities =
+                    [for screenKvp in world.Entities do
+                        for groupKvp in screenKvp.Value do
+                            for entityKvp in groupKvp.Value do
+                                let address = Address<Entity>.make [screenKvp.Key; groupKvp.Key; entityKvp.Key]
+                                yield (address, entityKvp.Value)]
 
                 // apply overlays to all entities
                 let world =
@@ -433,64 +277,65 @@ module WorldModule =
                             match entity.OptOverlayName with
                             | Some overlayName ->
                                 let oldFacetNames = entity.FacetNames
-                                Overlayer.applyOverlayToFacetNames entity.OptOverlayName overlayName entity oldOverlayer world.State.Overlayer
+                                Overlayer.applyOverlayToFacetNames overlayName overlayName entity oldOverlayer world.Subsystems.Overlayer
                                 match World.trySynchronizeFacets oldFacetNames (Some address) entity world with
                                 | Right (entity, world) ->
-                                    Overlayer.applyOverlay5 entity.OptOverlayName overlayName entity oldOverlayer world.State.Overlayer
+                                    let facetNames = Entity.getFacetNames entity
+                                    Overlayer.applyOverlay6 overlayName overlayName facetNames entity oldOverlayer world.Subsystems.Overlayer
                                     World.setEntity address entity world
                                 | Left error -> note <| "There was an issue in applying a reloaded overlay: " + error; world
                             | None -> world)
                         world
-                        (World.getEntities1 world)
+                        entities
 
                 // right!
                 Right world
 
             // propagate error
-            with exn -> Left <| string exn
+            with exn -> Left <| acstring exn
 
-        static member tryReloadAssets inputDir outputDir world =
+        static member tryReloadAssets inputDirectory outputDirectory refinementDirectory world =
             
             // try to reload asset graph file
             try File.Copy (
-                    Path.Combine (inputDir, world.State.AssetGraphFileName),
-                    Path.Combine (outputDir, world.State.AssetGraphFileName), true)
+                    Path.Combine (inputDirectory, world.State.AssetGraphFilePath),
+                    Path.Combine (outputDirectory, world.State.AssetGraphFilePath), true)
 
                 // reload asset graph
-                match Assets.tryBuildAssetGraph inputDir outputDir world.State.AssetGraphFileName with
+                match Assets.tryBuildAssetGraph inputDirectory outputDirectory refinementDirectory false world.State.AssetGraphFilePath with
                 | Right () ->
 
                     // reload asset metadata
-                    match Metadata.tryGenerateAssetMetadataMap world.State.AssetGraphFileName with
+                    match Metadata.tryGenerateAssetMetadataMap world.State.AssetGraphFilePath with
                     | Right assetMetadataMap ->
                     
                         // reload assets
                         let world = World.setAssetMetadataMap assetMetadataMap world
-                        let world = World.reloadRenderingAssets world
+                        let world = World.reloadRenderAssets world
                         let world = World.reloadAudioAssets world
                         Right world
             
                     // propagate errors
                     | Left errorMsg -> Left errorMsg
                 | Left error -> Left error
-            with exn -> Left <| string exn
+            with exn -> Left <| acstring exn
 
         static member continueHack groupAddress world =
             // NOTE: since messages may be invalid upon continuing a world (especially physics
             // messages), all messages are eliminated. If this poses an issue, the editor will have
             // to instead store past / future worlds only once their current frame has been
             // processed (integrated, advanced, rendered, played, et al).
-            let world = World.clearRenderingMessages world
+            let world = World.clearRenderMessages world
             let world = World.clearAudioMessages world
             let world = World.clearPhysicsMessages world
             let world = World.addPhysicsMessage RebuildPhysicsHackMessage world
-            let entities = World.getEntities groupAddress world
+            let entityMap = World.getEntityMap groupAddress world
             Map.fold
                 (fun world _ (entity : Entity) ->
-                    let entityAddress = groupAddress @+ [entity.Name]
+                    let entityAddress = gatoea groupAddress entity.Name
                     Entity.propagatePhysics entityAddress entity world)
                 world
-                entities
+                entityMap
 
         static member private play world =
             let audioMessages = world.MessageQueues.AudioMessages
@@ -503,10 +348,10 @@ module WorldModule =
                 (fun entity -> Entity.getRenderDescriptors entity world)
                 entities
 
-        static member private getTransitionRenderDescriptors camera transition =
+        static member private getScreenTransitionRenderDescriptors camera screen transition =
             match transition.OptDissolveImage with
             | Some dissolveImage ->
-                let progress = single transition.TransitionTicks / single transition.TransitionLifetime
+                let progress = single screen.TransitionTicksNp / single transition.TransitionLifetime
                 let alpha = match transition.TransitionType with Incoming -> 1.0f - progress | Outgoing -> progress
                 let color = Vector4 (Vector3.One, alpha)
                 [LayerableDescriptor
@@ -533,17 +378,17 @@ module WorldModule =
                     let descriptors = List.map (World.getGroupRenderDescriptors world) entityMaps
                     let descriptors = List.concat <| List.concat descriptors
                     let selectedScreen = World.getScreen selectedScreenAddress world
-                    match selectedScreen.ScreenState with
-                    | IncomingState -> descriptors @ World.getTransitionRenderDescriptors world.Camera selectedScreen.Incoming
-                    | OutgoingState -> descriptors @ World.getTransitionRenderDescriptors world.Camera selectedScreen.Outgoing
+                    match selectedScreen.ScreenStateNp with
+                    | IncomingState -> descriptors @ World.getScreenTransitionRenderDescriptors world.Camera selectedScreen selectedScreen.Incoming
+                    | OutgoingState -> descriptors @ World.getScreenTransitionRenderDescriptors world.Camera selectedScreen selectedScreen.Outgoing
                     | IdlingState -> descriptors
                 | None -> []
             | None -> []
 
         static member private render world =
             let renderDescriptors = World.getRenderDescriptors world
-            let renderingMessages = world.MessageQueues.RenderingMessages
-            let world = World.clearRenderingMessages world
+            let renderingMessages = world.MessageQueues.RenderMessages
+            let world = World.clearRenderMessages world
             let renderer = world.Subsystems.Renderer.Render (world.Camera, renderingMessages, renderDescriptors)
             World.setRenderer renderer world
 
@@ -552,19 +397,18 @@ module WorldModule =
             | Running ->
                 match integrationMessage with
                 | BodyTransformMessage bodyTransformMessage ->
-                    match World.getOptEntity bodyTransformMessage.EntityAddress world with
-                    | Some entity -> snd <| World.handleBodyTransformMessage bodyTransformMessage bodyTransformMessage.EntityAddress entity world
+                    match World.getOptEntity (atoea bodyTransformMessage.SourceAddress) world with
+                    | Some entity -> snd <| World.handleBodyTransformMessage bodyTransformMessage (atoea bodyTransformMessage.SourceAddress) entity world
                     | None -> world
                 | BodyCollisionMessage bodyCollisionMessage ->
-                    match World.getOptEntity bodyCollisionMessage.EntityAddress world with
+                    match World.getOptEntity (atoea bodyCollisionMessage.SourceAddress) world with
                     | Some _ ->
-                        let collisionAddress = CollisionEventAddress + bodyCollisionMessage.EntityAddress
+                        let collisionAddress = CollisionEventAddress ->- bodyCollisionMessage.SourceAddress
                         let collisionData =
-                            CollisionData
-                                { Normal = bodyCollisionMessage.Normal
-                                  Speed = bodyCollisionMessage.Speed
-                                  Collidee = bodyCollisionMessage.EntityAddress2 }
-                        World.publish4 collisionAddress Address.empty collisionData world
+                            { Normal = bodyCollisionMessage.Normal
+                              Speed = bodyCollisionMessage.Speed
+                              Collidee = (atoea bodyCollisionMessage.Source2Address) }
+                        World.publish4 collisionData collisionAddress GameAddress world
                     | None -> world
             | Exiting -> world
 
@@ -581,7 +425,7 @@ module WorldModule =
 
         static member private processTask (tasksNotRun, world) task =
             if task.ScheduledTime < world.State.TickTime then
-                debug <| "Task leak found for time '" + string world.State.TickTime + "'."
+                debug <| "Task leak found for time '" + acstring world.State.TickTime + "'."
                 (tasksNotRun, world)
             elif task.ScheduledTime = world.State.TickTime then
                 let world = task.Operation world
@@ -602,57 +446,60 @@ module WorldModule =
                     World.exit world
                 | SDL.SDL_EventType.SDL_MOUSEMOTION ->
                     let mousePosition = Vector2 (single event.button.x, single event.button.y)
-                    if World.isMouseButtonDown MouseLeft world
-                    then World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
-                    else World.publish World.sortSubscriptionsByPickingPriority MouseMoveEventAddress Address.empty (MouseButtonData { Position = mousePosition; Button = MouseLeft }) world
+                    let world =
+                        if World.isMouseButtonDown MouseLeft world
+                        then World.publish World.sortSubscriptionsByPickingPriority { MouseMoveData.Position = mousePosition } MouseDragEventAddress GameAddress world
+                        else world
+                    World.publish World.sortSubscriptionsByPickingPriority { MouseMoveData.Position = mousePosition } MouseMoveEventAddress GameAddress world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONDOWN ->
-                    
-                    let mouseButton = World.toNuMouseButton <| uint32 event.button.button
                     let mousePosition = World.getMousePositionF world
-                    if mouseButton.IsSome then 
-                        printfn "mouseButtonDown.IsSome"
-                        let mouseEventAddress = DownMouseEventAddress @+ [string mouseButton.Value]
-                        let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton.Value }
-                        World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
-                    else
-                        World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
+                    let mouseButton = World.toNuMouseButton <| uint32 event.button.button
+                    let mouseButtonEventAddress = ltoa [MouseButton.toEventName mouseButton]
+                    let mouseButtonDownEventAddress = MouseEventAddress -<- mouseButtonEventAddress -<- ltoa<MouseButtonData> ["Down"]
+                    let mouseButtonChangeEventAddress = MouseEventAddress -<- mouseButtonEventAddress -<- ltoa<MouseButtonData> ["Change"]
+                    let eventData = { Position = mousePosition; Button = mouseButton; Down = true }
+                    let world = World.publish World.sortSubscriptionsByPickingPriority eventData mouseButtonDownEventAddress GameAddress world
+                    World.publish World.sortSubscriptionsByPickingPriority eventData mouseButtonChangeEventAddress GameAddress world
                 | SDL.SDL_EventType.SDL_MOUSEBUTTONUP ->
-                    let mouseButton = World.toNuMouseButton <| uint32 event.button.button
                     let mousePosition = World.getMousePositionF world
-
-                    if mouseButton.IsSome then
-                        printfn "mouseButtonUp.IsSome"
-                        let mouseEventAddress = UpMouseEventAddress @+ [string mouseButton.Value]
-                        let eventData = MouseButtonData { Position = mousePosition; Button = mouseButton.Value }
-                        World.publish World.sortSubscriptionsByPickingPriority mouseEventAddress Address.empty eventData world
-                    else
-                        World.publish World.sortSubscriptionsByPickingPriority MouseDragEventAddress Address.empty (MouseMoveData { Position = mousePosition }) world
-
+                    let mouseButton = World.toNuMouseButton <| uint32 event.button.button
+                    let mouseButtonEventAddress = ltoa [MouseButton.toEventName mouseButton]
+                    let mouseButtonUpEventAddress = MouseEventAddress -<- mouseButtonEventAddress -<- ltoa<MouseButtonData> ["Up"]
+                    let mouseButtonChangeEventAddress = MouseEventAddress -<- mouseButtonEventAddress -<- ltoa<MouseButtonData> ["Change"]
+                    let eventData = { Position = mousePosition; Button = mouseButton; Down = false }
+                    let world = World.publish World.sortSubscriptionsByPickingPriority eventData mouseButtonUpEventAddress GameAddress world
+                    World.publish World.sortSubscriptionsByPickingPriority eventData mouseButtonChangeEventAddress GameAddress world
                 | SDL.SDL_EventType.SDL_KEYDOWN ->
                     let keyboard = event.key
                     let key = keyboard.keysym
-                    let eventData = KeyboardKeyData { ScanCode = int key.scancode; IsRepeat = keyboard.repeat <> byte 0 }
-                    World.publish World.sortSubscriptionsByHierarchy DownKeyboardKeyEventAddress Address.empty eventData world
+                    let eventData = { ScanCode = int key.scancode; Repeated = keyboard.repeat <> byte 0; Down = true }
+                    let world = World.publish World.sortSubscriptionsByHierarchy eventData KeyboardKeyDownEventAddress GameAddress world
+                    World.publish World.sortSubscriptionsByHierarchy eventData KeyboardKeyChangeEventAddress GameAddress world
                 | SDL.SDL_EventType.SDL_KEYUP ->
                     let keyboard = event.key
                     let key = keyboard.keysym
-                    let eventData = KeyboardKeyData { ScanCode = int key.scancode; IsRepeat = keyboard.repeat <> byte 0 }
-                    World.publish World.sortSubscriptionsByHierarchy UpKeyboardKeyEventAddress Address.empty eventData world
+                    let eventData = { ScanCode = int key.scancode; Repeated = keyboard.repeat <> byte 0; Down = false }
+                    let world = World.publish World.sortSubscriptionsByHierarchy eventData KeyboardKeyUpEventAddress GameAddress world
+                    World.publish World.sortSubscriptionsByHierarchy eventData KeyboardKeyChangeEventAddress GameAddress world
                 | _ -> world
             (world.State.Liveness, world)
 
         static member processUpdate handleUpdate world =
-            let world = World.integrate world
+            let world = handleUpdate world
             match world.State.Liveness with
             | Running ->
-                let world = World.publish4 TickEventAddress Address.empty (NoData ()) world
+                let world = World.updateScreenTransition world
                 match world.State.Liveness with
                 | Running ->
-                    let world = World.updateTransition handleUpdate world
+                    let world = World.integrate world
                     match world.State.Liveness with
                     | Running ->
-                        let world = World.processTasks world
-                        (world.State.Liveness, world)
+                        let world = World.publish4 () TickEventAddress GameAddress world
+                        match world.State.Liveness with
+                        | Running ->
+                            let world = World.processTasks world
+                            (world.State.Liveness, world)
+                        | Exiting -> (Exiting, world)
                     | Exiting -> (Exiting, world)
                 | Exiting -> (Exiting, world)
             | Exiting -> (Exiting, world)
@@ -682,82 +529,87 @@ module WorldModule =
         static member run tryMakeWorld handleUpdate sdlConfig =
             World.run4 tryMakeWorld handleUpdate id sdlConfig
 
+        static member private pairWithName source =
+            (Reflection.getTypeName source, source)
+
+        static member private pairWithNames sources =
+            Map.ofListBy World.pairWithName sources
+
         static member tryMake
-            sdlDeps
-            (userComponentFactory : UserComponentFactory)
-            interactivity
             farseerCautionMode
-            userState =
+            useLoadedGameDispatcher
+            interactivity
+            userState
+            (nuPlugin : NuPlugin)
+            sdlDeps =
 
             // attempt to generate asset metadata so the rest of the world can be created
-            match Metadata.tryGenerateAssetMetadataMap AssetGraphFileName with
+            match Metadata.tryGenerateAssetMetadataMap AssetGraphFilePath with
             | Right assetMetadataMap ->
 
-                // make user components
-                let userEntityDispatchers = userComponentFactory.MakeEntityDispatchers ()
-                let userGroupDispatchers = userComponentFactory.MakeGroupDispatchers ()
-                let userScreenDispatchers = userComponentFactory.MakeScreenDispatchers ()
-                let userGameDispatchers = userComponentFactory.MakeGameDispatchers ()
-                let userFacets = userComponentFactory.MakeFacets ()
+                // make user-defined values
+                let userFacets = World.pairWithNames <| nuPlugin.MakeFacets ()
+                let userEntityDispatchers = World.pairWithNames <| nuPlugin.MakeEntityDispatchers ()
+                let userGroupDispatchers = World.pairWithNames <| nuPlugin.MakeGroupDispatchers ()
+                let userScreenDispatchers = World.pairWithNames <| nuPlugin.MakeScreenDispatchers ()
+                let userOptGameDispatcher = nuPlugin.MakeOptGameDispatcher ()
+                let userOverlayRoutes = nuPlugin.MakeOverlayRoutes ()
 
                 // infer the active game dispatcher
                 let defaultGameDispatcher = GameDispatcher ()
                 let activeGameDispatcher =
-                    match Map.toValueList userGameDispatchers with
-                    | [] -> defaultGameDispatcher
-                    | [singlet] -> singlet
-                    | head :: _ ->
-                        debug <|
-                            "Received more than one GameDispatcher from userComponentFactory. " +
-                            "Defaulting to '" + Reflection.getTypeName head + "'."
-                        head
-
-                // make entity dispatchers
-                // TODO: see if we can reflectively generate these
-                let defaultEntityDispatchers =
-                    Map.ofList
-                        [typeof<EntityDispatcher>.Name, EntityDispatcher ()
-                         typeof<ButtonDispatcher>.Name, ButtonDispatcher () :> EntityDispatcher
-                         typeof<LabelDispatcher>.Name, LabelDispatcher () :> EntityDispatcher
-                         typeof<TextDispatcher>.Name, TextDispatcher () :> EntityDispatcher
-                         typeof<ToggleDispatcher>.Name, ToggleDispatcher () :> EntityDispatcher
-                         typeof<FeelerDispatcher>.Name, FeelerDispatcher () :> EntityDispatcher
-                         typeof<FillBarDispatcher>.Name, FillBarDispatcher () :> EntityDispatcher
-                         typeof<BlockDispatcher>.Name, BlockDispatcher () :> EntityDispatcher
-                         typeof<BoxDispatcher>.Name, BoxDispatcher () :> EntityDispatcher
-                         typeof<AvatarDispatcher>.Name, AvatarDispatcher () :> EntityDispatcher
-                         typeof<CharacterDispatcher>.Name, CharacterDispatcher () :> EntityDispatcher
-                         typeof<TileMapDispatcher>.Name, TileMapDispatcher () :> EntityDispatcher]
-                let entityDispatchers = Map.addMany (Map.toSeq userEntityDispatchers) defaultEntityDispatchers
-
-                // make group dispatchers
-                let defaultGroupDispatchers = Map.ofList [typeof<GroupDispatcher>.Name, GroupDispatcher ()]
-                let groupDispatchers = Map.addMany (Map.toSeq userGroupDispatchers) defaultGroupDispatchers
-
-                // make screen dispatchers
-                let defaultScreenDispatchers = Map.ofList [typeof<ScreenDispatcher>.Name, ScreenDispatcher ()]
-                let screenDispatchers = Map.addMany (Map.toSeq userScreenDispatchers) defaultScreenDispatchers
-
-                // make game dispatchers
-                let defaultGameDispatchers = Map.ofList [typeof<GameDispatcher>.Name, defaultGameDispatcher]
-                let gameDispatchers = Map.addMany (Map.toSeq userGameDispatchers) defaultGameDispatchers
+                    if useLoadedGameDispatcher then
+                        match userOptGameDispatcher with
+                        | Some gameDispatcher -> gameDispatcher
+                        | None -> defaultGameDispatcher
+                    else defaultGameDispatcher
 
                 // make facets
                 let defaultFacets =
                     Map.ofList
                         [typeof<RigidBodyFacet>.Name, RigidBodyFacet () :> Facet
                          typeof<SpriteFacet>.Name, SpriteFacet () :> Facet
-                         typeof<AnimatedSpriteFacet>.Name, AnimatedSpriteFacet () :> Facet
-                         typeof<UIFacet>.Name, UIFacet () :> Facet]
+                         typeof<AnimatedSpriteFacet>.Name, AnimatedSpriteFacet () :> Facet]
                 let facets = Map.addMany (Map.toSeq userFacets) defaultFacets
 
+                // make entity dispatchers
+                // TODO: see if we can reflectively generate these
+                let defaultEntityDispatcherList =
+                    [EntityDispatcher ()
+                     GuiDispatcher () :> EntityDispatcher
+                     ButtonDispatcher () :> EntityDispatcher
+                     LabelDispatcher () :> EntityDispatcher
+                     TextDispatcher () :> EntityDispatcher
+                     ToggleDispatcher () :> EntityDispatcher
+                     FeelerDispatcher () :> EntityDispatcher
+                     FillBarDispatcher () :> EntityDispatcher
+                     BlockDispatcher () :> EntityDispatcher
+                     BoxDispatcher () :> EntityDispatcher
+                     TopViewCharacterDispatcher () :> EntityDispatcher
+                     SideViewCharacterDispatcher () :> EntityDispatcher
+                     TileMapDispatcher () :> EntityDispatcher]
+                let defaultEntityDispatchers = World.pairWithNames defaultEntityDispatcherList
+                let entityDispatchers = Map.addMany (Map.toSeq userEntityDispatchers) defaultEntityDispatchers
+
+                // make group dispatchers
+                let defaultGroupDispatchers = Map.ofList [World.pairWithName <| GroupDispatcher ()]
+                let groupDispatchers = Map.addMany (Map.toSeq userGroupDispatchers) defaultGroupDispatchers
+
+                // make screen dispatchers
+                let defaultScreenDispatchers = Map.ofList [World.pairWithName <| ScreenDispatcher ()]
+                let screenDispatchers = Map.addMany (Map.toSeq userScreenDispatchers) defaultScreenDispatchers
+
+                // make game dispatchers
+                let defaultGameDispatchers = Map.ofList [World.pairWithName <| defaultGameDispatcher]
+                let gameDispatchers = 
+                    match userOptGameDispatcher with
+                    | Some gameDispatcher ->
+                        let (gameDispatcherName, gameDispatcher) = World.pairWithName gameDispatcher
+                        Map.add gameDispatcherName gameDispatcher defaultGameDispatchers
+                    | None -> defaultGameDispatchers
+
                 // make intrinsic overlays
-                let dispatchers =
-                    Map.map Map.objectify entityDispatchers @@
-                    Map.map Map.objectify groupDispatchers @@
-                    Map.map Map.objectify screenDispatchers @@
-                    Map.map Map.objectify gameDispatchers
-                let intrinsicOverlays = World.createIntrinsicOverlays dispatchers facets
+                let intrinsicOverlays = World.createIntrinsicOverlays entityDispatchers facets
 
                 // make the world's components
                 let components =
@@ -769,14 +621,15 @@ module WorldModule =
 
                 // make the world's subsystems
                 let subsystems =
-                    { AudioPlayer = AudioPlayer.make AssetGraphFileName
-                      Renderer = Renderer.make sdlDeps.RenderContext AssetGraphFileName
-                      Integrator = Integrator.make farseerCautionMode Gravity }
+                    { AudioPlayer = AudioPlayer.make AssetGraphFilePath
+                      Renderer = Renderer.make sdlDeps.RenderContext AssetGraphFilePath
+                      Integrator = Integrator.make farseerCautionMode Gravity 
+                      Overlayer = Overlayer.make OverlayFilePath intrinsicOverlays }
 
                 // make the world's message queues
                 let messageQueues =
                     { AudioMessages = [HintAudioPackageUseMessage { PackageName = DefaultPackageName }]
-                      RenderingMessages = [HintRenderingPackageUseMessage { PackageName = DefaultPackageName }]
+                      RenderMessages = [HintRenderPackageUseMessage { PackageName = DefaultPackageName }]
                       PhysicsMessages = [] }
 
                 // make the world's callbacks
@@ -791,15 +644,19 @@ module WorldModule =
                     { TickTime = 0L
                       Liveness = Running
                       Interactivity = interactivity
+                      OptScreenTransitionDestinationAddress = None
                       AssetMetadataMap = assetMetadataMap
-                      AssetGraphFileName = AssetGraphFileName
-                      Overlayer = Overlayer.make OverlayFileName intrinsicOverlays
-                      OverlayFileName = OverlayFileName
+                      AssetGraphFilePath = AssetGraphFilePath
+                      OverlayRouter = OverlayRouter.make entityDispatchers userOverlayRoutes
+                      OverlayFilePath = OverlayFilePath
                       UserState = userState }
+
+                // make the game
+                let game = World.makeGame activeGameDispatcher
 
                 // make the world itself
                 let world =
-                    { Game = Game.make activeGameDispatcher <| Some DefaultGameName
+                    { Game = game
                       Screens = Map.empty
                       Groups = Map.empty
                       Entities = Map.empty
@@ -835,12 +692,13 @@ module WorldModule =
             let subsystems =
                 { AudioPlayer = { MockAudioPlayer  = () }
                   Renderer = { MockRenderer = () }
-                  Integrator = { MockIntegrator = () }}
+                  Integrator = { MockIntegrator = () }
+                  Overlayer = { Overlays = XmlDocument () }}
 
             // make the world's message queues
             let messageQueues =
                 { AudioMessages = []
-                  RenderingMessages = []
+                  RenderMessages = []
                   PhysicsMessages = [] }
 
             // make the world's callbacks
@@ -854,16 +712,20 @@ module WorldModule =
             let state =
                 { TickTime = 0L
                   Liveness = Running
-                  Interactivity = UIOnly
-                  AssetMetadataMap = Metadata.generateEmptyAssetMetadataMap ()
-                  AssetGraphFileName = String.Empty
-                  Overlayer = Overlayer.makeEmpty ()
-                  OverlayFileName = String.Empty
+                  Interactivity = GuiOnly
+                  OptScreenTransitionDestinationAddress = None
+                  AssetMetadataMap = Map.empty
+                  AssetGraphFilePath = String.Empty
+                  OverlayRouter = OverlayRouter.make (Map.ofList [World.pairWithName entityDispatcher]) []
+                  OverlayFilePath = String.Empty
                   UserState = userState }
+
+            // make the game
+            let game = World.makeGame gameDispatcher
 
             // make the world itself
             let world =
-                { Game = Game.make gameDispatcher <| Some DefaultGameName
+                { Game = game
                   Screens = Map.empty
                   Groups = Map.empty
                   Entities = Map.empty
@@ -878,21 +740,19 @@ module WorldModule =
             snd <| Game.register world.Game world
 
         static member init () =
-            
+
+            // make types load reflectively from pathed (non-static) assemblies
+            AppDomain.CurrentDomain.AssemblyLoad.Add
+                (fun args -> LoadedAssemblies.[args.LoadedAssembly.FullName] <- args.LoadedAssembly)
+            AppDomain.CurrentDomain.add_AssemblyResolve <| ResolveEventHandler
+                (fun _ args -> snd <| LoadedAssemblies.TryGetValue args.Name)
+
             // ensure the current culture is invariate
-            System.Threading.Thread.CurrentThread.CurrentCulture <-
-                System.Globalization.CultureInfo.InvariantCulture
+            System.Threading.Thread.CurrentThread.CurrentCulture <- System.Globalization.CultureInfo.InvariantCulture
 
-            // init the type converters
+            // init type converters
             Math.initTypeConverters ()
-            Audio.initTypeConverters ()
-            Rendering.initTypeConverters ()
 
-            // assign functions to the pub / sub refs.
-            World.publish <- World.publishDefinition
-            World.publish4 <- World.publish4Definition
-            World.subscribe <- World.subscribeDefinition
-            World.subscribe4 <- World.subscribe4Definition
-            World.unsubscribe <- World.unsubscribeDefinition
-            World.withSubscription <- World.withSubscriptionDefinition
-            World.monitor <- World.monitorDefinition
+            // assign functions to the pub / sub vars
+            World.getSimulant <- World.getSimulantDefinition
+            World.getOptSimulant <- World.getOptSimulantDefinition

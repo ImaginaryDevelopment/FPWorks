@@ -4,12 +4,13 @@
 namespace Aml
 open System
 open FParsec.CharParsers
+open Prime
 open Aml.Ast
 open Aml.AmlConstants
 open Aml.Primitives
 open Aml.Reader
 open Aml.Writer
-open Aml.EvaluatorPrims
+open Aml.EvaluatorPrimitives
 open Aml.Evaluator
 module Repl =
 

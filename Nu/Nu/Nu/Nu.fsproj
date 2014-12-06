@@ -68,27 +68,34 @@
     <Compile Include="Math.fs" />
     <Compile Include="Xtension.fs" />
     <Compile Include="Overlayer.fs" />
+    <Compile Include="OverlayRouter.fs" />
     <Compile Include="Serialization.fs" />
     <Compile Include="Reflection.fs" />
     <Compile Include="Camera.fs" />
     <Compile Include="Assets.fs" />
     <Compile Include="Physics.fs" />
-    <Compile Include="Rendering.fs" />
+    <Compile Include="Render.fs" />
     <Compile Include="Audio.fs" />
     <Compile Include="Metadata.fs" />
     <Compile Include="Input.fs" />
     <Compile Include="Sdl.fs" />
     <Compile Include="Simulation.fs" />
+    <Compile Include="Simulant.fs" />
+    <Compile Include="WorldConstants.fs" />
+    <Compile Include="WorldPrimitives.fs" />
     <Compile Include="Entity.fs" />
     <Compile Include="Group.fs" />
     <Compile Include="Screen.fs" />
     <Compile Include="Game.fs" />
-    <Compile Include="React.fs" />
     <Compile Include="Dispatchers.fs" />
     <Compile Include="World.fs" />
+    <Compile Include="Observer.fs" />
+    <Compile Include="Desync.fs" />
+    <Compile Include="AddressTests.fs" />
     <Compile Include="XtensionTests.fs" />
     <Compile Include="WorldTests.fs" />
-    <Compile Include="ReactTests.fs" />
+    <Compile Include="ObserverTests.fs" />
+    <Compile Include="DesyncTests.fs" />
     <Compile Include="Program.fs" />
     <None Include="Interactive.fsx" />
     <None Include="App.config" />
@@ -156,11 +163,8 @@
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
       <Private>True</Private>
     </Reference>
-    <Reference Include="FSharpx.Collections">
-      <HintPath>..\..\FSharpx.Collections\FSharpx.Collections.dll</HintPath>
-    </Reference>
-    <Reference Include="FSharpx.Core">
-      <HintPath>..\..\FSharpx.Core\FSharpx.Core.dll</HintPath>
+    <Reference Include="Magick.NET-AnyCPU">
+      <HintPath>..\..\Magick.NET\Magick.NET-AnyCPU.dll</HintPath>
     </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="SDL2#">
