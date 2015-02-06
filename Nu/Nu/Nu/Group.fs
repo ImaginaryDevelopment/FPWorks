@@ -256,7 +256,10 @@ module WorldGroupModule =
         static member readGroupHierarchyFromFile (filePath : string) world =
             let separator = Path.DirectorySeparatorChar |> fun c-> c.ToString()
             let targetFilePath = filePath.Replace("/",separator);
-            use reader = XmlReader.Create targetFilePath
+            let combinedPath = Path.Combine(Environment.CurrentDirectory,targetFilePath)
+            let fullerPath = Uri(combinedPath).AbsolutePath.Replace("/",separator).Replace("%20"," ")
+            if System.IO.File.Exists(combinedPath) = false then failwithf "Could not find path for file %s which could resolve to %s" combinedPath fullerPath
+            use reader = XmlReader.Create combinedPath
             let document = let emptyDoc = XmlDocument () in (emptyDoc.Load reader; emptyDoc)
             let rootNode = document.[RootNodeName]
             let groupNode = rootNode.[GroupNodeName]
