@@ -1,5 +1,5 @@
 ﻿// Prime - A PRIMitivEs code library.
-// Copyright (C) Bryan Edds, 2012-2014.
+// Copyright (C) Bryan Edds, 2012-2015.
 
 namespace Prime
 open System
@@ -11,34 +11,37 @@ open System.Reflection
 module Miscellanea =
 
     /// The tautology function.
-    /// No matter what you pass it, it returns true.
-    let inline tautology _ = true
+    /// No matter what you pass it, it evaluates to true.
+    let tautology _ = true
 
     /// The tautology function with two arguments.
-    /// No matter what you pass it, it returns true.
-    let inline tautology2 _ _ = true
+    /// No matter what you pass it, it evaluates to true.
+    let tautology2 _ _ = true
 
     /// The tautology function with three arguments.
-    /// No matter what you pass it, it returns true.
-    let inline tautology3 _ _ _ = true
+    /// No matter what you pass it, it evaluates to true.
+    let tautology3 _ _ _ = true
 
     /// The absurdity function.
-    /// No matter what you pass it, it returns false.
-    let inline absurdity _ = false
+    /// No matter what you pass it, it evaluates to false.
+    let absurdity _ = false
 
     /// The absurdity function with two arguments.
-    /// No matter what you pass it, it returns false.
-    let inline absurdity2 _ _ = false
+    /// No matter what you pass it, it evaluates to false.
+    let absurdity2 _ _ = false
 
     /// Convert any value to an obj.
-    let inline objectify x = x :> obj
+    let objectify x = x :> obj
 
     /// Flip two function parameters.
     /// TODO: curry and uncurry.
-    let inline flip f x y = f y x
+    let flip f x y = f y x
+
+    /// Fail with an unexpected match failure.
+    let failwithumf () = failwith "Unexpected match failure."
 
     /// Convert any value to its type.
-    let inline getType x = x.GetType ()
+    let getType x = x.GetType ()
 
     /// A generic identification code type.
     type Id = int64
@@ -75,8 +78,8 @@ module Miscellanea =
         ignore <| TypeDescriptor.AddAttributes (typeof<'t>, TypeConverterAttribute typeof<'c>)
 
     /// Short-hand for linq enumerable cast.
-    let enumerable<'t> enumeratable =
-        System.Linq.Enumerable.Cast<'t> enumeratable
+    let enumerable<'a> enumeratable =
+        System.Linq.Enumerable.Cast<'a> enumeratable
 
     /// Convert a couple of ints to a Guid value.
     /// It is the user's responsibility to ensure uniqueness when using the resulting Guids.
@@ -85,14 +88,11 @@ module Miscellanea =
         Guid (m, int16 (n >>> 16), int16 n, bytes)
 
     /// Sequences two functions like Haskell ($).
-    let inline ( ^^ ) f g = f g
-
-    /// Sequences two functions like Haskell ($).
-    let inline ( ^| ) f g = f g
+    let inline (^) f g = f g
 
     /// Combine the contents of two maps, taking an item from the second map in the case of a key
     /// conflict.
-    let inline ( @@ ) map map2 =
+    let inline (@@) map map2 =
         Map.fold
             (fun map key value -> Map.add key value map)
             map
@@ -179,7 +179,7 @@ module TypeModule =
                 (fun (property : PropertyInfo) -> property.Name = propertyName)
                 (this.GetProperties ())
 
-        member this.GetPropertiesWritable =
+        member this.GetPropertiesWritable () =
             Seq.filter
                 (fun (property : PropertyInfo) -> property.CanWrite)
                 (this.GetProperties ())

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -62,7 +62,7 @@
   <ItemGroup>
     <Compile Include="BlazeConstants.fs" />
     <Compile Include="BlazeDispatchers.fs" />
-    <Compile Include="BlazeProgression.fs" />
+    <Compile Include="BlazeDispatcher.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <Content Include="AssetGraph.xml">
@@ -73,8 +73,16 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\SDL2Addendum\SDL2Addendum\SDL2Addendum\SDL2Addendum.csproj">
+      <Name>SDL2Addendum</Name>
+      <Project>{f184a111-8c28-40b4-8cde-7bf2a64b3ca7}</Project>
+      <Private>True</Private>
+    </ProjectReference>
     <Reference Include="FarseerPhysics">
       <HintPath>..\..\..\Nu\Farseer\FarseerPhysics.dll</HintPath>
+    </Reference>
+    <Reference Include="FSharpx.Core">
+      <HintPath>..\..\..\Prime\FSharpx.Core\FSharpx.Core.dll</HintPath>
     </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
@@ -110,7 +118,7 @@
     <PostBuildEvent>"$(ProjectDir)..\..\..\Nu\Nu\NuPipe\bin\$(ConfigurationName)\NuPipe.exe" "$(ProjectDir)\" "$(TargetDir)\" "$(ProjectDir)Refinement" False</PostBuildEvent>
   </PropertyGroup>
   <Target Name="AfterClean">
-    <RemoveDir Directories="$(OutDir)Assets"/>
-    <RemoveDir Directories="$(OutDir)Refinement"/>
+    <RemoveDir Directories="$(OutDir)Assets" />
+    <RemoveDir Directories="$(OutDir)Refinement" />
   </Target>
 </Project>

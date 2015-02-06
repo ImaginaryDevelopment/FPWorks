@@ -1,4 +1,7 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.Xml
 open System.IO
@@ -145,54 +148,51 @@ module Assets =
                                   Refinements = refinements })
                             filePaths
                     Some <| List.ofArray assets
-                with exn -> 
-                    let fullpath = Path.Combine(Environment.CurrentDirectory,directory)
-                    debug <| "Invalid directory '" + directory + "'. from " + Environment.CurrentDirectory + " resolves as " + fullpath; None
+                with exn -> debug <| "Invalid directory '" + directory + "'."; None
             | None -> None
         | None -> None
 
     /// Attempt to load all the assets from a package Xml node.
     let tryLoadAssetsFromPackageNode usingRawAssets optAssociation (node : XmlNode) =
         let assets =
-            List.fold
-                (fun assets (assetNode : XmlNode) ->
+            Seq.fold
+                (fun assetsRev (assetNode : XmlNode) ->
                     match assetNode.Name with
                     | AssetNodeName ->
                         match tryLoadAssetFromAssetNode assetNode with
-                        | Some asset -> asset :: assets
-                        | None -> debug <| "Invalid asset node in '" + node.Name + "' in asset graph."; assets
+                        | Some asset -> asset :: assetsRev
+                        | None -> debug <| "Invalid asset node in '" + node.Name + "' in asset graph."; assetsRev
                     | AssetsNodeName ->
                         match tryLoadAssetsFromAssetsNode usingRawAssets assetNode with
-                        | Some loadedAssets -> loadedAssets @ assets
-                        | None -> debug <| "Invalid assets node in '" + node.Name + "' in asset graph."; assets
-                    | "#comment" ->
-                        assets
-                    | invalidNodeType -> debug <| "Invalid package child node type '" + invalidNodeType + "'."; assets)
+                        | Some loadedAssets -> List.rev loadedAssets @ assetsRev
+                        | None -> debug <| "Invalid assets node in '" + node.Name + "' in asset graph."; assetsRev
+                    | CommentNodeName -> assetsRev
+                    | invalidNodeType -> debug <| "Invalid package child node type '" + invalidNodeType + "'."; assetsRev)
                 []
-                (List.ofSeq <| enumerable node.ChildNodes)
-        let associatedAssets =
-            match optAssociation with
-            | Some association -> List.filter (fun asset -> List.exists ((=) association) asset.Associations) assets
-            | None -> assets
-        List.ofSeq associatedAssets
+                (enumerable node.ChildNodes) |>
+            List.rev
+        match optAssociation with
+        | Some association -> List.filter (fun asset -> List.exists ((=) association) asset.Associations) assets
+        | None -> assets
 
     /// Attempt to load all the assets from the document root Xml node.
     let tryLoadAssetsFromRootNode usingRawAssets optAssociation (node : XmlNode) =
         let possiblePackageNodes = List.ofSeq <| enumerable node.ChildNodes
         let packageNodes =
-            List.fold
-                (fun packageNodes (node : XmlNode) ->
-                    if node.Name = PackageNodeName then node :: packageNodes
-                    else packageNodes)
+            List.fold (fun packageNodesRev (node : XmlNode) ->
+                if node.Name = PackageNodeName
+                then node :: packageNodesRev
+                else packageNodesRev)
                 []
-                possiblePackageNodes
+                possiblePackageNodes |>
+            List.rev
         let assetLists =
-            List.fold
-                (fun assetLists packageNode ->
-                    let assets = tryLoadAssetsFromPackageNode usingRawAssets optAssociation packageNode
-                    assets :: assetLists)
+            List.fold (fun assetListsRev packageNode ->
+                let assets = tryLoadAssetsFromPackageNode usingRawAssets optAssociation packageNode
+                assets :: assetListsRev)
                 []
-                packageNodes
+                packageNodes |>
+            List.rev
         let assets = List.concat assetLists
         Right assets
 
@@ -278,7 +278,7 @@ module Assets =
         let refinementFilePath = Path.Combine (refinementDirectory, refinementFileSubpath)
 
         // refine the asset
-        ignore <| Directory.CreateDirectory ^| Path.GetDirectoryName refinementFilePath
+        ignore <| Directory.CreateDirectory ^ Path.GetDirectoryName refinementFilePath
         match refinement with
         | PsdToPng ->
             use image = new MagickImage (intermediateFilePath)
@@ -328,7 +328,7 @@ module Assets =
                 // attempt to copy the intermediate asset if output file is out of date
                 let intermediateFilePath = Path.Combine (intermediateDirectory, intermediateFileSubpath)
                 let outputFilePath = Path.Combine (outputDirectory, intermediateFileSubpath)
-                ignore <| Directory.CreateDirectory ^| Path.GetDirectoryName outputFilePath
+                ignore <| Directory.CreateDirectory ^ Path.GetDirectoryName outputFilePath
                 try File.Copy (intermediateFilePath, outputFilePath, true)
                 with _ -> note <| "Resource lock on '" + outputFilePath + "' has prevented build for asset '" + acstring asset.AssetTag + "'."
 

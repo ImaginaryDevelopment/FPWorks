@@ -1,4 +1,7 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.Xml
 open System.Reflection
@@ -104,7 +107,7 @@ module Overlayer =
                 let value = converter.ConvertFromString valueStr
                 property.SetValue (target, value)
 
-    let private applyOverlayToDotNetProperties oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer =
+    let private applyOverlayToProperties oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer =
         let targetType = target.GetType ()
         let targetProperties = targetType.GetProperties ()
         for property in targetProperties do
@@ -121,25 +124,22 @@ module Overlayer =
         | xtensionProperty ->
             match xtensionProperty.GetValue target with
             | :? Xtension as xtension ->
-                let optNodes =
-                    Seq.fold
-                        (fun optNodes (kvp : KeyValuePair<string, XField>) ->
-                            match trySelectNode newOverlayName kvp.Key newOverlayer with
-                            | Some node -> (kvp.Value.FieldType, node) :: optNodes
-                            | None -> optNodes)
+                let nodes =
+                    List.foldBack (fun (kvp : KeyValuePair<string, XField>) optNodes ->
+                        match trySelectNode newOverlayName kvp.Key newOverlayer with
+                        | Some node -> (kvp.Value.FieldType, node) :: optNodes
+                        | None -> optNodes)
+                        (List.ofSeq xtension.XFields)
                         []
-                        xtension.XFields
-                let nodes = List.ofSeq optNodes
                 let xFields =
-                    List.fold
-                        (fun xFields (aType, node : XmlNode) ->
-                            if isPropertyOverlaid oldOverlayName facetNames node.Name aType target oldOverlayer then
-                                let value = AlgebraicDescriptor.convertFromString node.InnerText aType
-                                let xField = { FieldValue = value; FieldType = aType }
-                                (node.Name, xField) :: xFields
-                            else xFields)
-                        []
+                    List.foldBack (fun (aType, node : XmlNode) xFields ->
+                        if isPropertyOverlaid oldOverlayName facetNames node.Name aType target oldOverlayer then
+                            let value = AlgebraicDescriptor.convertFromString node.InnerText aType
+                            let xField = { FieldValue = value; FieldType = aType }
+                            (node.Name, xField) :: xFields
+                        else xFields)
                         nodes
+                        []
                 let xFields = Map.addMany xFields xtension.XFields
                 let xtension = { xtension with XFields = xFields }
                 xtensionProperty.SetValue (target, xtension)
@@ -159,7 +159,7 @@ module Overlayer =
     /// Only the properties / fields that are overlaid by the old overlay as specified by the old
     /// overlayer will be changed.
     let applyOverlay6 oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer =
-        applyOverlayToDotNetProperties oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer
+        applyOverlayToProperties oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer
         applyOverlayToXtension oldOverlayName newOverlayName facetNames target oldOverlayer newOverlayer
 
     /// Apply an overlay to the given target.

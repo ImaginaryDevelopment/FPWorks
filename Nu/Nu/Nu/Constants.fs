@@ -1,32 +1,34 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2014.
+// Copyright (C) Bryan Edds, 2013-2015.
 
 namespace Nu
 open System
 open OpenTK
 open Nu
-
 module Constants =
 
     let [<Literal>] DefaultScreenName = "Screen"
     let [<Literal>] DefaultGroupName = "Group"
     let [<Literal>] DefaultEntityName = "Entity"
+    let [<Literal>] IntegratorSubsystemName = "IntegratorSubsystem"
+    let [<Literal>] RendererSubsystemName = "RendererSubsystem"
+    let [<Literal>] AudioPlayerSubsystemName = "AudioPlayerSubsystem"
     let [<Literal>] NameFieldName = "Name"
     let [<Literal>] RootNodeName = "Root"
-    let [<Literal>] TypeAttributeName = "type"
     let [<Literal>] DispatcherNameAttributeName = "dispatcherName"
     let [<Literal>] AssetGraphFilePath = "AssetGraph.xml"
     let [<Literal>] OverlayFilePath = "Overlay.xml"
     let [<Literal>] DefaultPackageName = "Default"
     let [<Literal>] IncludesAttributeName = "includes"
-    let [<Literal>] DefaultImageValue = "[Image | Default | AssetGraph.xml]"
-    let [<Literal>] DefaultTileMapAssetValue = "[TileMap | Default | AssetGraph.xml]"
-    let [<Literal>] DefaultFontValue = "[Font | Default | AssetGraph.xml]"
-    let [<Literal>] DefaultSoundValue = "[Sound | Default | AssetGraph.xml]"
-    let [<Literal>] DefaultSongValue = "[Song | Default | AssetGraph.xml]"
+    let [<Literal>] DefaultImageValue = "[Default | Image]"
+    let [<Literal>] DefaultTileMapAssetValue = "[Default | TileMap]"
+    let [<Literal>] DefaultFontValue = "[Default | Font]"
+    let [<Literal>] DefaultSoundValue = "[Default | Sound]"
+    let [<Literal>] DefaultSongValue = "[Default | Song]"
     let [<Literal>] PackageNodeName = "Package"
     let [<Literal>] AssetNodeName = "Asset"
     let [<Literal>] AssetsNodeName = "Assets"
+    let [<Literal>] CommentNodeName = "#comment"
     let [<Literal>] GameNodeName = "Game"
     let [<Literal>] ScreenNodeName = DefaultScreenName
     let [<Literal>] ScreensNodeName = DefaultScreenName + "s"
@@ -45,8 +47,9 @@ module Constants =
     let [<Literal>] AudioAssociation = "Audio"
     let [<Literal>] SuccessExitCode = 0
     let [<Literal>] FailureExitCode = 1
+    let [<Literal>] DesiredFps = 60
+    let [<Literal>] DefaultSubsystemOrder = 1.0f
     let InvalidId = Guid.Empty
-    let DesiredFps = 60
     let ScreenClearing = ColorClear (255uy, 255uy, 255uy)
     let PhysicsStepRate = 1.0f / single DesiredFps
     let PhysicsToPixelRatio = 64.0f

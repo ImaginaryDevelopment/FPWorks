@@ -1,370 +1,475 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.Collections.Generic
+open FSharpx
+open OpenTK
 open Prime
 open Nu
 open Nu.Constants
+open Nu.WorldConstants
 
-[<RequireQualifiedAccess>]
-module World =
+[<AutoOpen>]
+module WorldPrimitivesModule =
 
     let private AnyEventAddressesCache =
         Dictionary<obj Address, obj Address list> HashIdentity.Structural
 
-    /// Set the Camera field of the world.
-    let setCamera camera world =
-        { world with Camera = camera }
+    type World with
 
-    /// Transform a bunch of simulants in the context of a world.
-    let transformSimulants transform patoca parentAddress simulants world =
-        Map.fold
-            (fun (simulants, world) simulantName simulant ->
-                let (simulant, world) = transform (patoca parentAddress simulantName) simulant world
-                (Map.add simulantName simulant simulants, world))
-            (Map.empty, world)
-            simulants
+        (* Publishing *)
 
-    /// Get all of a world's dispatchers.
-    let internal getDispatchers world =
-        Map.map Map.objectify world.Components.EntityDispatchers @@
-        Map.map Map.objectify world.Components.GroupDispatchers @@
-        Map.map Map.objectify world.Components.ScreenDispatchers @@
-        Map.map Map.objectify world.Components.GameDispatchers
+        static member internal sortFstDesc (priority : single, _) (priority2 : single, _) =
+            // OPTIMIZATION: priority parameter is annotated as 'single' to decrease GC pressure.
+            if priority > priority2 then -1
+            elif priority < priority2 then 1
+            else 0
 
-    /// Set the EntityDispatchers field of the world.
-    let internal setEntityDispatchers dispatchers world =
-        let components = { world.Components with EntityDispatchers = dispatchers }
-        { world with Components = components }
+        static member private getAnyEventAddresses eventAddress =
+            // OPTIMIZATION: uses memoization.
+            if not <| Address.isEmpty eventAddress then
+                let anyEventAddressesKey = Address.allButLast eventAddress
+                match AnyEventAddressesCache.TryGetValue anyEventAddressesKey with
+                | (true, anyEventAddresses) -> anyEventAddresses
+                | (false, _) ->
+                    let eventAddressList = eventAddress.Names
+                    let anyEventAddressList = AnyEventAddress.Names
+                    let anyEventAddresses =
+                        [for i in 0 .. List.length eventAddressList - 1 do
+                            let subNameList = List.take i eventAddressList @ anyEventAddressList
+                            yield Address.make subNameList]
+                    AnyEventAddressesCache.Add (anyEventAddressesKey, anyEventAddresses)
+                    anyEventAddresses
+            else failwith "Event name cannot be empty."
 
-    /// Set the GroupDispatchers field of the world.
-    let internal setGroupDispatchers dispatchers world =
-        let components = { world.Components with GroupDispatchers = dispatchers }
-        { world with Components = components }
-
-    /// Set the ScreenDispatchers field of the world.
-    let internal setScreenDispatchers dispatchers world =
-        let components = { world.Components with ScreenDispatchers = dispatchers }
-        { world with Components = components }
-
-    /// Set the GameDispatchers field of the world.
-    let internal setGameDispatchers dispatchers world =
-        let components = { world.Components with GameDispatchers = dispatchers }
-        { world with Components = components }
-
-    /// Set the Facets field of the world.
-    let internal setFacets facets world =
-        let components = { world.Components with Facets = facets }
-        { world with Components = components }
-
-    /// Set the AudioPlayer field of the world.
-    let internal setAudioPlayer audioPlayer world =
-        let subsystems = { world.Subsystems with AudioPlayer = audioPlayer }
-        { world with Subsystems = subsystems }
-
-    /// Set the Renderer field of the world.
-    let internal setRenderer renderer world =
-        let subsystems = { world.Subsystems with Renderer = renderer }
-        { world with Subsystems = subsystems }
-
-    /// Set the Integrator field of the world.
-    let internal setIntegrator integrator world =
-        let subsystems = { world.Subsystems with Integrator = integrator }
-        { world with Subsystems = subsystems }
-
-    /// Set the Overlayer field of the world.
-    let internal setOverlayer overlayer world =
-        let subsystems = { world.Subsystems with Overlayer = overlayer }
-        { world with Subsystems = subsystems }
-
-    /// Clear the audio messages.
-    let internal clearAudioMessages world =
-        let messageQueues = { world.MessageQueues with AudioMessages = [] }
-        { world with MessageQueues = messageQueues }
-
-    /// Clear the rendering messages.
-    let internal clearRenderMessages world =
-        let messageQueues = { world.MessageQueues with RenderMessages = [] }
-        { world with MessageQueues = messageQueues }
-
-    /// Clear the physics messages.
-    let internal clearPhysicsMessages world =
-        let messageQueues = { world.MessageQueues with PhysicsMessages = [] }
-        { world with MessageQueues = messageQueues }
-
-    /// Add a physics message to the world.
-    let addPhysicsMessage message world =
-        let messageQueues = { world.MessageQueues with PhysicsMessages = message :: world.MessageQueues.PhysicsMessages }
-        { world with MessageQueues = messageQueues }
-
-    /// Add a rendering message to the world.
-    let addRenderMessage message world =
-        let messageQueues = { world.MessageQueues with RenderMessages = message :: world.MessageQueues.RenderMessages }
-        { world with MessageQueues = messageQueues }
-
-    /// Add an audio message to the world.
-    let addAudioMessage message world =
-        let messageQueues = { world.MessageQueues with AudioMessages = message :: world.MessageQueues.AudioMessages }
-        { world with MessageQueues = messageQueues }
-
-    /// Add a task to be executed by the engine at the specified task tick.
-    let addTask task world =
-        let callbacks = { world.Callbacks with Tasks = task :: world.Callbacks.Tasks }
-        { world with Callbacks = callbacks }
-
-    /// Add multiple task to be executed by the engine at the specified task tick.
-    let addTasks tasks world =
-        let callbacks = { world.Callbacks with Tasks = tasks @ world.Callbacks.Tasks }
-        { world with Callbacks = callbacks }
-
-    /// Restore tasks to be executed by the engine at the specified task tick.
-    let internal restoreTasks tasks world =
-        let callbacks = { world.Callbacks with Tasks = world.Callbacks.Tasks @ tasks }
-        { world with Callbacks = callbacks }
-
-    /// Clear all tasks.
-    let internal clearTasks world =
-        let callbacks = { world.Callbacks with Tasks = [] }
-        { world with Callbacks = callbacks }
-
-    /// Add callback state to the world.
-    let addCallbackState key state world =
-        let callbacks = { world.Callbacks with CallbackStates = Map.add key (state :> obj) world.Callbacks.CallbackStates }
-        { world with Callbacks = callbacks }
-
-    /// Remove callback state from the world.
-    let removeCallbackState key world =
-        let callbacks = { world.Callbacks with CallbackStates = Map.remove key world.Callbacks.CallbackStates }
-        { world with Callbacks = callbacks }
-
-    /// Get callback state from the world.
-    let getCallbackState<'a> key world =
-        let state = Map.find key world.Callbacks.CallbackStates
-        state :?> 'a
-
-    /// Increment the TickTime field of the world.
-    let internal incrementTickTime world =
-        let state = { world.State with TickTime = world.State.TickTime + 1L }
-        { world with State = state }
-
-    /// Set the OptScreenTransitionDestinationAddress field of the world.
-    let internal setOptScreenTransitionDestinationAddress address world =
-        let state = { world.State with OptScreenTransitionDestinationAddress = address  }
-        { world with State = state }
-
-    /// Place the world into a state such that the app will exit at the end of the current frame.
-    let exit world =
-        let state = { world.State with Liveness = Exiting }
-        { world with State = state }
-
-    /// Query that the engine is in game-playing mode.
-    let isGamePlaying world =
-        Interactivity.isGamePlaying world.State.Interactivity
-
-    /// Query that the physics system is running.
-    let isPhysicsRunning world =
-        Interactivity.isPhysicsRunning world.State.Interactivity
-
-    /// Set the level of the world's interactivity.
-    let setInteractivity interactivity world =
-        let state = { world.State with Interactivity = interactivity }
-        { world with State = state }
-
-    /// Set the AssetMetadataMap field of the world.
-    let setAssetMetadataMap assetMetadataMap world =
-        let state = { world.State with AssetMetadataMap = assetMetadataMap }
-        { world with State = state }
-
-    /// Get the UserState field of the world, casted to 'u.
-    let getUserState world : 'u =
-        world.State.UserState :?> 'u
-
-    /// Set the UserState field of the world.
-    let setUserState (userState : 'u) world =
-        let state = { world.State with UserState = userState }
-        { world with State = state }
-
-    /// Transform the UserState field of the world.
-    let transformUserState (transformer : 'u -> 'v) world =
-        let state = getUserState world
-        let state = transformer state
-        setUserState state world
-
-    /// Make a key used to track an unsubscription with a subscription.
-    let makeSubscriptionKey () =
-        Guid.NewGuid ()
-
-    /// Make a callback key used to track callback states.
-    let makeCallbackKey () =
-        Guid.NewGuid ()
-
-    /// Get a simulant at the given address from the world.
-    let mutable getSimulant =
-        Unchecked.defaultof<Simulant Address -> World -> Simulant>
-
-    /// Try to get a simulant at the given address from the world.
-    let mutable getOptSimulant =
-        Unchecked.defaultof<Simulant Address -> World -> Simulant option>
-
-    // OPTIMIZATION: priority annotated as single to decrease GC pressure.
-    let private sortFstDesc (priority : single, _) (priority2 : single, _) =
-        if priority > priority2 then -1
-        elif priority < priority2 then 1
-        else 0
-    
-    let private boxSubscription<'d> (subscription : 'd Subscription) =
-        let boxableSubscription = fun (event : obj) world ->
-            try subscription (event :?> 'd Event) world
-            with
-            | :? InvalidCastException ->
-                // NOTE: If you've reached this exception, then you've probably inadvertantly mixed
-                // up an event data type parameter for some form of World.publish or subscribe.
-                reraise ()
-            | _ -> reraise ()
-        box boxableSubscription
-
-    let private getSimulantPublishingPriority getEntityPublishingPriority simulant world =
-        match simulant with
-        | Game _ -> GamePublishingPriority
-        | Screen _ -> ScreenPublishingPriority
-        | Group _ -> GroupPublishingPriority
-        | Entity entity -> getEntityPublishingPriority entity world
-
-    let private getSortableSubscriptions getEntityPublishingPriority (subscriptions : SubscriptionEntry list) world : (single * SubscriptionEntry) list =
-        List.fold
-            (fun subscriptions (key, address, subscription) ->
-                match getOptSimulant (atoua address) world with
-                | Some simulant ->
-                    let priority = getSimulantPublishingPriority getEntityPublishingPriority simulant world
-                    let subscription = (priority, (key, address, subscription))
-                    subscription :: subscriptions
-                | None -> (0.0f, (key, address, subscription)) :: subscriptions)
-            []
-            subscriptions
-
-    let sortSubscriptionsBy by (subscriptions : SubscriptionEntry list) world =
-        let subscriptions = getSortableSubscriptions by subscriptions world
-        let subscriptions = List.sortWith sortFstDesc subscriptions
-        List.map snd subscriptions
-
-    let sortSubscriptionsByPickingPriority subscriptions world =
-        sortSubscriptionsBy
-            (fun (entity : Entity) world -> entity.DispatcherNp.GetPickingPriority (entity, world))
-            subscriptions
-            world
-
-    let sortSubscriptionsByHierarchy subscriptions world =
-        sortSubscriptionsBy
-            (fun _ _ -> EntityPublishingPriority)
-            subscriptions
-            world
-
-    let sortSubscriptionsNone (subscriptions : SubscriptionEntry list) _ =
-        subscriptions
-
-    // OPTIMIZATION: uses memoization.
-    let private getAnyEventAddresses eventAddress =
-        if not <| Address.isEmpty eventAddress then
-            let anyEventAddressesKey = Address.allButLast eventAddress
-            match AnyEventAddressesCache.TryGetValue anyEventAddressesKey with
-            | (true, anyEventAddresses) -> anyEventAddresses
-            | (false, _) ->
-                let eventAddressList = eventAddress.Names
-                let anyEventAddressList = WorldConstants.AnyEventAddress.Names
-                let anyEventAddresses =
-                    [for i in 0 .. List.length eventAddressList - 1 do
-                        let subNameList = List.take i eventAddressList @ anyEventAddressList
-                        yield Address.make subNameList]
-                AnyEventAddressesCache.Add (anyEventAddressesKey, anyEventAddresses)
-                anyEventAddresses
-        else failwith "Event name cannot be empty."
-
-    let private getSubscriptionsSorted (publishSorter : SubscriptionSorter) eventAddress world =
-        let anyEventAddresses = getAnyEventAddresses eventAddress
-        let optSubLists = List.map (fun anyEventAddress -> Map.tryFind anyEventAddress world.Callbacks.Subscriptions) anyEventAddresses
-        let optSubLists = Map.tryFind eventAddress world.Callbacks.Subscriptions :: optSubLists
-        let subLists = List.definitize optSubLists
-        let subList = List.concat subLists
-        publishSorter subList world
-
-    /// Publish an event.
-    let publish<'d, 'p> publishSorter (eventData : 'd) (eventAddress : 'd Address) (publisherAddress : 'p Address) world =
-        let objEventAddress = atooa eventAddress
-        let subscriptions = getSubscriptionsSorted publishSorter objEventAddress world
-        let (_, world) =
-            List.foldWhile
-                (fun (eventHandling, world) (_, subscriberAddress, subscription) ->
-                    if  (match eventHandling with Cascade -> true | Resolve -> false) &&
-                        (match world.State.Liveness with Running -> true | Exiting -> false) then
-                        let event =
-                            { SubscriberAddress = subscriberAddress
-                              PublisherAddress = atooa publisherAddress
-                              EventAddress = eventAddress
-                              Data = eventData }
-                        let callableSubscription = unbox<BoxableSubscription> subscription
-                        let result = callableSubscription event world
-                        Some result
-                    else None)
-                (Cascade, world)
+        static member private getSortableSubscriptions getEntityPublishingPriority (subscriptions : SubscriptionEntry rQueue) world : (single * SubscriptionEntry) list =
+            List.fold
+                (fun subscriptions (key, simulant : Simulant, subscription) ->
+                    let priority = simulant.GetPublishingPriority getEntityPublishingPriority world
+                    let subscription = (priority, (key, simulant, subscription))
+                    subscription :: subscriptions)
+                []
                 subscriptions
-        world
 
-    /// Publish an event.
-    let publish4<'d, 'p> (eventData : 'd) (eventAddress : 'd Address) (publisherAddress : 'p Address) world =
-        publish sortSubscriptionsByHierarchy eventData eventAddress publisherAddress world
+        static member private getSubscriptionsSorted (publishSorter : SubscriptionSorter) eventAddress world =
+            let anyEventAddresses = World.getAnyEventAddresses eventAddress
+            let optSubLists = List.map (fun anyEventAddress -> Map.tryFind anyEventAddress world.Callbacks.Subscriptions) anyEventAddresses
+            let optSubLists = Map.tryFind eventAddress world.Callbacks.Subscriptions :: optSubLists
+            let subLists = List.definitize optSubLists
+            let subList = List.concat subLists
+            publishSorter subList world
 
-    /// Subscribe to an event.
-    let subscribe<'d, 's> subscriptionKey (subscription : 'd Subscription) (eventAddress : 'd Address) (subscriberAddress : 's Address) world =
-        if not <| Address.isEmpty eventAddress then
+        static member private boxSubscription<'a, 's when 's :> Simulant> (subscription : Subscription<'a, 's>) =
+            let boxableSubscription = fun (event : obj) world ->
+                try subscription (event :?> Event<'a, 's>) world
+                with
+                | :? InvalidCastException ->
+                    // NOTE: If you've reached this exception, then you've probably inadvertantly mixed
+                    // up an event type parameter for some form of World.publish or subscribe.
+                    reraise ()
+                | _ -> reraise ()
+            box boxableSubscription
+
+        static member private publishEvent<'a, 'p, 's when 'p :> Simulant and 's :> Simulant>
+            (subscriber : Simulant) (publisher : 'p) (eventAddress : 'a Address) (eventData : 'a) subscription world =
+            let event =
+                { Subscriber = subscriber :?> 's
+                  Publisher = publisher :> Simulant
+                  EventAddress = eventAddress
+                  Data = eventData }
+            let callableSubscription = unbox<BoxableSubscription> subscription
+            let result = callableSubscription event world
+            Some result
+
+        /// Make a key used to track an unsubscription with a subscription.
+        static member makeSubscriptionKey () = Guid.NewGuid ()
+
+        /// Make a callback key used to track callback states.
+        static member makeCallbackKey () = Guid.NewGuid ()
+
+        /// Get an entity's picking priority.
+        static member getEntityPickingPriority entity world =
+            let entityState = World.getEntityState entity world
+            let dispatcher = entityState.DispatcherNp
+            dispatcher.GetPickingPriority entity entityState.Depth world
+
+        /// Sort subscriptions using categorization via the 'by' procedure.
+        static member sortSubscriptionsBy by (subscriptions : SubscriptionEntry list) world =
+            let subscriptions = World.getSortableSubscriptions by subscriptions world
+            let subscriptions = List.sortWith World.sortFstDesc subscriptions
+            List.map snd subscriptions
+
+        /// Sort subscriptions by their editor picking priority.
+        static member sortSubscriptionsByPickingPriority subscriptions world =
+            World.sortSubscriptionsBy World.getEntityPickingPriority subscriptions world
+
+        /// Sort subscriptions by their place in the world's simulant hierarchy.
+        static member sortSubscriptionsByHierarchy subscriptions world =
+            World.sortSubscriptionsBy
+                (fun _ _ -> EntityPublishingPriority)
+                subscriptions
+                world
+
+        /// A 'no-op' for subscription sorting - that is, performs no sorting at all.
+        static member sortSubscriptionsNone (subscriptions : SubscriptionEntry list) (_ : World) =
+            subscriptions
+
+        /// Publish an event, using the given publishSorter procedure to arranging the order to which subscriptions are published.
+        static member publish<'a, 'p when 'p :> Simulant> publishSorter (eventData : 'a) (eventAddress : 'a Address) (publisher : 'p) world =
             let objEventAddress = atooa eventAddress
-            let subscriptions =
-                let subscriptionEntry = (subscriptionKey, atooa subscriberAddress, boxSubscription subscription)
-                match Map.tryFind objEventAddress world.Callbacks.Subscriptions with
-                | Some subscriptionEntries -> Map.add objEventAddress (subscriptionEntry :: subscriptionEntries) world.Callbacks.Subscriptions
-                | None -> Map.add objEventAddress [subscriptionEntry] world.Callbacks.Subscriptions
-            let unsubscriptions = Map.add subscriptionKey (objEventAddress, atooa subscriberAddress) world.Callbacks.Unsubscriptions
-            let callbacks = { world.Callbacks with Subscriptions = subscriptions; Unsubscriptions = unsubscriptions }
-            { world with Callbacks = callbacks }
-        else failwith "Event name cannot be empty."
+            let subscriptions = World.getSubscriptionsSorted publishSorter objEventAddress world
+            let (_, world) =
+                List.foldWhile
+                    (fun (eventHandling, world) (_, subscriber : Simulant, subscription) ->
+                        if  (match eventHandling with Cascade -> true | Resolve -> false) &&
+                            (match world.State.Liveness with Running -> true | Exiting -> false) then
+                            match subscriber.SimulantAddress.Names with
+                            | [] -> World.publishEvent<'a, 'p, Game> subscriber publisher eventAddress eventData subscription world
+                            | [_] -> World.publishEvent<'a, 'p, Screen> subscriber publisher eventAddress eventData subscription world
+                            | [_; _] -> World.publishEvent<'a, 'p, Group> subscriber publisher eventAddress eventData subscription world
+                            | [_; _; _] -> World.publishEvent<'a, 'p, Entity> subscriber publisher eventAddress eventData subscription world
+                            | _ -> failwith "Unexpected match failure in 'Nu.World.publish.'"
+                        else None)
+                    (Cascade, world)
+                    subscriptions
+            world
 
-    /// Subscribe to an event.
-    let subscribe4<'d, 's> (subscription : 'd Subscription) (eventAddress : 'd Address) (subscriberAddress : 's Address) world =
-        subscribe (makeSubscriptionKey ()) subscription eventAddress subscriberAddress world
+        /// Publish an event.
+        static member publish4<'a, 'p when 'p :> Simulant>
+            (eventData : 'a) (eventAddress : 'a Address) (publisher : 'p) world =
+            World.publish World.sortSubscriptionsByHierarchy eventData eventAddress publisher world
 
-    /// Unsubscribe from an event.
-    let unsubscribe subscriptionKey world =
-        match Map.tryFind subscriptionKey world.Callbacks.Unsubscriptions with
-        | Some (eventAddress, subscriberAddress) ->
-            match Map.tryFind eventAddress world.Callbacks.Subscriptions with
-            | Some subscriptionList ->
-                let subscriptionList =
-                    List.remove
-                        (fun (subscriptionKey', subscriberAddress', _) ->
-                            subscriptionKey' = subscriptionKey &&
-                            subscriberAddress' = subscriberAddress)
-                        subscriptionList
-                let subscriptions = 
-                    match subscriptionList with
-                    | [] -> Map.remove eventAddress world.Callbacks.Subscriptions
-                    | _ -> Map.add eventAddress subscriptionList world.Callbacks.Subscriptions
-                let unsubscriptions = Map.remove subscriptionKey world.Callbacks.Unsubscriptions
+        /// Subscribe to an event.
+        static member subscribe<'a, 's when 's :> Simulant>
+            subscriptionKey (subscription : Subscription<'a, 's>) (eventAddress : 'a Address) (subscriber : 's) world =
+            if not <| Address.isEmpty eventAddress then
+                let objEventAddress = atooa eventAddress
+                let subscriptions =
+                    let subscriptionEntry = (subscriptionKey, subscriber :> Simulant, World.boxSubscription subscription)
+                    match Map.tryFind objEventAddress world.Callbacks.Subscriptions with
+                    | Some subscriptionEntries -> Map.add objEventAddress (subscriptionEntry :: subscriptionEntries) world.Callbacks.Subscriptions
+                    | None -> Map.add objEventAddress [subscriptionEntry] world.Callbacks.Subscriptions
+                let unsubscriptions = Map.add subscriptionKey (objEventAddress, subscriber :> Simulant) world.Callbacks.Unsubscriptions
                 let callbacks = { world.Callbacks with Subscriptions = subscriptions; Unsubscriptions = unsubscriptions }
                 { world with Callbacks = callbacks }
-            | None -> world
-        | None -> world
+            else failwith "Event name cannot be empty."
 
-    /// Keep active a subscription for the lifetime of a simulant.
-    let monitor<'d, 's> (subscription : 'd Subscription) (eventAddress : 'd Address) (subscriberAddress : 's Address) world =
-        if not <| Address.isEmpty subscriberAddress then
-            let monitorKey = makeSubscriptionKey ()
-            let removalKey = makeSubscriptionKey ()
-            let world = subscribe<'d, 's> monitorKey subscription eventAddress subscriberAddress world
-            let subscription' = fun _ world ->
-                let world = unsubscribe removalKey world
-                let world = unsubscribe monitorKey world
-                (Cascade, world)
-            let removingEventAddress = WorldConstants.RemovingEventAddress ->- atooa subscriberAddress
-            subscribe<unit, 's> removalKey subscription' removingEventAddress subscriberAddress world
-        else failwith "Cannot monitor events with an anonymous subscriber."
+        /// Subscribe to an event.
+        static member subscribe4<'a, 's when 's :> Simulant>
+            (subscription : Subscription<'a, 's>) (eventAddress : 'a Address) (subscriber : 's) world =
+            World.subscribe (World.makeSubscriptionKey ()) subscription eventAddress subscriber world
+
+        /// Unsubscribe from an event.
+        static member unsubscribe subscriptionKey world =
+            match Map.tryFind subscriptionKey world.Callbacks.Unsubscriptions with
+            | Some (eventAddress, subscriber) ->
+                match Map.tryFind eventAddress world.Callbacks.Subscriptions with
+                | Some subscriptionList ->
+                    let subscriptionList =
+                        List.remove
+                            (fun (subscriptionKey', subscriber', _) ->
+                                subscriptionKey' = subscriptionKey &&
+                                subscriber' = subscriber)
+                            subscriptionList
+                    let subscriptions = 
+                        match subscriptionList with
+                        | [] -> Map.remove eventAddress world.Callbacks.Subscriptions
+                        | _ -> Map.add eventAddress subscriptionList world.Callbacks.Subscriptions
+                    let unsubscriptions = Map.remove subscriptionKey world.Callbacks.Unsubscriptions
+                    let callbacks = { world.Callbacks with Subscriptions = subscriptions; Unsubscriptions = unsubscriptions }
+                    { world with Callbacks = callbacks }
+                | None -> world
+            | None -> world
+
+        /// Keep active a subscription for the lifetime of a simulant.
+        static member monitor<'a, 's when 's :> Simulant>
+            (subscription : Subscription<'a, 's>) (eventAddress : 'a Address) (subscriber : 's) world =
+            if not <| Address.isEmpty subscriber.SimulantAddress then
+                let monitorKey = World.makeSubscriptionKey ()
+                let removalKey = World.makeSubscriptionKey ()
+                let world = World.subscribe<'a, 's> monitorKey subscription eventAddress subscriber world
+                let subscription' = fun _ world ->
+                    let world = World.unsubscribe removalKey world
+                    let world = World.unsubscribe monitorKey world
+                    (Cascade, world)
+                let removingEventAddress = stoa<unit> (typeof<'s>.Name + "/" + "Removing") ->>- subscriber.SimulantAddress
+                World.subscribe<unit, 's> removalKey subscription' removingEventAddress subscriber world
+            else failwith "Cannot monitor events with an anonymous subscriber."
+
+        (* Entity *)
+
+        static member private optEntityStateFinder entity world =
+            match entity.EntityAddress.Names with
+            | [screenName; groupName; entityName] ->
+                let (_, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (_, entityStateMap) -> Map.tryFind entityName entityStateMap
+                    | None -> None
+                | None -> None
+            | _ -> failwith <| "Invalid entity address '" + acstring entity.EntityAddress + "'."
+
+        static member private entityStateAdder (entityState : EntityState) entity world =
+            match entity.EntityAddress.Names with
+            | [screenName; groupName; entityName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (screenState, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (groupState, entityStateMap) ->
+                        let entityStateMap = Map.add entityName entityState entityStateMap
+                        let groupStateMap = Map.add groupName (groupState, entityStateMap) groupStateMap
+                        let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                        { world with SimulantStates = (gameState, screenStateMap) }
+                    | None -> failwith <| "Cannot add entity '" + acstring entity.EntityAddress + "' to non-existent group."
+                | None -> failwith <| "Cannot add entity '" + acstring entity.EntityAddress + "' to non-existent screen."
+            | _ -> failwith <| "Invalid entity address '" + acstring entity.EntityAddress + "'."
+
+        static member private entityStateRemover entity world =
+            match entity.EntityAddress.Names with
+            | [screenName; groupName; entityName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (screenState, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (groupState, entityStateMap) ->
+                        let entityStateMap = Map.remove entityName entityStateMap
+                        let groupStateMap = Map.add groupName (groupState, entityStateMap) groupStateMap
+                        let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                        { world with SimulantStates = (gameState, screenStateMap) }
+                    | None -> world
+                | None -> world
+            | _ -> failwith <| "Invalid entity address '" + acstring entity.EntityAddress + "'."
+
+        static member internal getEntityStateMap group world =
+            match group.GroupAddress.Names with
+            | [screenName; groupName] ->
+                let (_, screenStateMap) = world.SimulantStates
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (_, entityStateMap) -> entityStateMap
+                    | None -> Map.empty
+                | None -> Map.empty
+            | _ -> failwith <| "Invalid group address '" + acstring group.GroupAddress + "'."
+
+        static member internal getOptEntityState entity world =
+            World.optEntityStateFinder entity world
+
+        static member internal getEntityState (entity : Entity) world =
+            Option.get ^ World.getOptEntityState entity world
+
+        static member internal setEntityStateWithoutEvent entityState entity world =
+            World.entityStateAdder entityState entity world
+
+        static member internal setOptEntityStateWithoutEvent optEntityState entity world =
+            match optEntityState with 
+            | Some entityState -> World.entityStateAdder entityState entity world
+            | None -> World.entityStateRemover entity world
+
+        static member internal setEntityState entityState (entity : Entity) world =
+            let oldWorld = world
+            let world = World.entityStateAdder entityState entity world
+            if entityState.PublishChanges then
+                World.publish4
+                    { Simulant = entity; OldWorld = oldWorld }
+                    (EntityChangeEventAddress ->>- entity.EntityAddress)
+                    entity
+                    world
+            else world
+
+        static member internal updateEntityState updater entity world =
+            let entityState = World.getEntityState entity world
+            let entityState = updater entityState
+            World.setEntityState entityState entity world
+
+        (* Group *)
+
+        static member private optGroupStateFinder group world =
+            match group.GroupAddress.Names with
+            | [screenName; groupName] ->
+                let (_, screenStateMap) = world.SimulantStates
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (groupState, _) -> Some groupState
+                    | None -> None
+                | None -> None
+            | _ -> failwith <| "Invalid group address '" + acstring group.GroupAddress + "'."
+
+        static member private groupStateAdder (groupState : GroupState) group world =
+            match group.GroupAddress.Names with
+            | [screenName; groupName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (screenState, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (_, entityStateMap) ->
+                        let groupStateMap = Map.add groupName (groupState, entityStateMap) groupStateMap
+                        let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                        { world with SimulantStates = (gameState, screenStateMap) }
+                    | None ->
+                        let groupStateMap = Map.add groupName (groupState, Map.empty) groupStateMap
+                        let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                        { world with SimulantStates = (gameState, screenStateMap) }
+                | None -> failwith <| "Cannot add group '" + acstring group.GroupAddress + "' to non-existent screen."
+            | _ -> failwith <| "Invalid group address '" + acstring group.GroupAddress + "'."
+
+        static member private groupStateRemover group world =
+            match group.GroupAddress.Names with
+            | [screenName; groupName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (screenState, groupStateMap) ->
+                    match Map.tryFind groupName groupStateMap with
+                    | Some (_, entityStateMap) ->
+                        if Map.isEmpty entityStateMap then
+                            let groupStateMap = Map.remove groupName groupStateMap
+                            let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                            { world with SimulantStates = (gameState, screenStateMap) }
+                        else failwith <| "Cannot remove group " + acstring group.GroupAddress + ", which still contains entities."
+                    | None -> world
+                | None -> world
+            | _ -> failwith <| "Invalid group address '" + acstring group.GroupAddress + "'."
+
+        static member internal getGroupStateMap screen world =
+            match screen.ScreenAddress.Names with
+            | [screenName] ->
+                let (_, screenStateMap) = world.SimulantStates
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) -> groupStateMap
+                | None -> Map.empty
+            | _ -> failwith <| "Invalid screen address '" + acstring screen.ScreenAddress + "'."
+
+        static member internal getOptGroupState group world =
+            World.optGroupStateFinder group world
+
+        static member internal getGroupState group world : GroupState =
+            Option.get ^ World.getOptGroupState group world
+
+        static member internal setGroupStateWithoutEvent groupState group world =
+            World.groupStateAdder groupState group world
+
+        static member internal setOptGroupStateWithoutEvent optGroupState group world =
+            match optGroupState with 
+            | Some groupState -> World.groupStateAdder groupState group world
+            | None -> World.groupStateRemover group world
+
+        static member internal setGroupState groupState group world =
+            let oldWorld = world
+            let world = World.groupStateAdder groupState group world
+            if groupState.PublishChanges then
+                World.publish4
+                    { Simulant = group; OldWorld = oldWorld }
+                    (GroupChangeEventAddress ->>- group.GroupAddress)
+                    group
+                    world
+            else world
+
+        static member internal updateGroupState updater group world =
+            let groupState = World.getGroupState group world
+            let groupState = updater groupState
+            World.setGroupState groupState group world
+
+        (* Screen *)
+
+        static member private optScreenStateFinder screen world =
+            match screen.ScreenAddress.Names with
+            | [screenName] ->
+                let (_, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (screenState, _) -> Some screenState
+                | None -> None
+            | _ -> failwith <| "Invalid screen address '" + acstring screen.ScreenAddress + "'."
+
+        static member private screenStateAdder (screenState : ScreenState) screen world =
+            match screen.ScreenAddress.Names with
+            | [screenName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) ->
+                    let screenStateMap = Map.add screenName (screenState, groupStateMap) screenStateMap
+                    { world with SimulantStates = (gameState, screenStateMap) }
+                | None ->
+                    let screenStateMap = Map.add screenName (screenState, Map.empty) screenStateMap
+                    { world with SimulantStates = (gameState, screenStateMap) }
+            | _ -> failwith <| "Invalid screen address '" + acstring screen.ScreenAddress + "'."
+
+        static member private screenStateRemover screen world =
+            match screen.ScreenAddress.Names with
+            | [screenName] ->
+                let (gameState, screenStateMap) = world.SimulantStates 
+                match Map.tryFind screenName screenStateMap with
+                | Some (_, groupStateMap) ->
+                    if Map.isEmpty groupStateMap then
+                        let screenStateMap = Map.remove screenName screenStateMap
+                        { world with SimulantStates = (gameState, screenStateMap) }
+                    else failwith <| "Cannot remove screen " + acstring screen.ScreenAddress + ", which still contains groups."
+                | None -> world
+            | _ -> failwith <| "Invalid screen address '" + acstring screen.ScreenAddress + "'."
+
+        static member internal getScreenStateMap world =
+            snd world.SimulantStates
+
+        static member internal getOptScreenState screen world =
+            World.optScreenStateFinder screen world
+
+        static member internal getScreenState screen world : ScreenState =
+            Option.get ^ World.getOptScreenState screen world
+
+        static member internal setScreenStateWithoutEvent screenState screen world =
+            World.screenStateAdder screenState screen world
+
+        static member internal setOptScreenStateWithoutEvent optScreenState screen world =
+            match optScreenState with
+            | Some screenState -> World.screenStateAdder screenState screen world
+            | None -> World.screenStateRemover screen world
+
+        static member internal setScreenState screenState screen world =
+            let oldWorld = world
+            let world = World.screenStateAdder screenState screen world
+            if screenState.PublishChanges then
+                World.publish4
+                    { Simulant = screen; OldWorld = oldWorld }
+                    (ScreenChangeEventAddress ->>- screen.ScreenAddress)
+                    screen
+                    world
+            else world
+
+        static member internal updateScreenState updater screen world =
+            let screenState = World.getScreenState screen world
+            let screenState = updater screenState
+            World.setScreenState screenState screen world
+
+        (* Game *)
+
+        static member internal getGameStateMap world =
+            let gameState = World.getGameState world
+            let screenStateMap = World.getScreenStateMap world
+            (gameState, screenStateMap)
+
+        static member internal getGameState world : GameState =
+            fst world.SimulantStates
+
+        static member internal setGameState gameState world =
+            let oldWorld = world
+            let screenStateMap = World.getScreenStateMap world
+            let world = { world with SimulantStates = (gameState, screenStateMap) }
+            if gameState.PublishChanges then
+                World.publish4
+                    { OldWorld = oldWorld; Simulant = Game }
+                    (GameChangeEventAddress ->>- Game.GameAddress)
+                    Game
+                    world
+            else world
+
+        static member internal updateGameState updater world =
+            let gameState = World.getGameState world
+            let gameState = updater gameState
+            World.setGameState gameState world
 
 [<AutoOpen>]
 module WorldInputModule =
@@ -398,232 +503,193 @@ module WorldInputModule =
         // TODO: implement isKeyboardModifierActive.
 
 [<AutoOpen>]
-module WorldPhysicsModule =
+module WorldSubsystemsModule =
 
     type World with
 
-        /// Does the world contain the body with the given physics id?
-        static member bodyExists physicsId world =
-            world.Subsystems.Integrator.BodyExists physicsId
+        static member internal getSubsystem<'s when 's :> Subsystem> name world =
+            Map.find name world.Subsystems :?> 's
 
-        /// Get the contact normals of the body with the given physics id.
-        static member getBodyContactNormals physicsId world =
-            world.Subsystems.Integrator.GetBodyContactNormals physicsId
+        static member internal getSubsystemBy<'s, 't when 's :> Subsystem> by name world : 't =
+            let subsystem = World.getSubsystem<'s> name world
+            by subsystem
 
-        /// Get the linear velocity of the body with the given physics id.
-        static member getBodyLinearVelocity physicsId world =
-            world.Subsystems.Integrator.GetBodyLinearVelocity physicsId
+        static member internal setSubsystem<'s when 's :> Subsystem> (subsystem : 's) name world =
+            let subsystems = Map.add name (subsystem :> Subsystem) world.Subsystems
+            { world with Subsystems = subsystems }
 
-        /// Get the contact normals where the body with the given physics id is touching the ground.
-        static member getBodyGroundContactNormals physicsId world =
-            world.Subsystems.Integrator.GetBodyGroundContactNormals physicsId
+        static member internal updateSubsystem<'s when 's :> Subsystem> (updater : 's -> World -> 's) name world =
+            let subsystem = World.getSubsystem<'s> name world
+            let subsystem = updater subsystem world
+            World.setSubsystem subsystem name world
 
-        /// Try to get a contact normal where the body with the given physics id is touching the ground.
-        static member getBodyOptGroundContactNormal physicsId world =
-            world.Subsystems.Integrator.GetBodyOptGroundContactNormal physicsId
+        static member internal updateSubsystems (updater : Subsystem -> World -> Subsystem) world =
+            Map.fold
+                (fun world name subsystem -> let subsystem = updater subsystem world in World.setSubsystem subsystem name world)
+                world
+                world.Subsystems
 
-        /// Try to get a contact tangent where the body with the given physics id is touching the ground.
-        static member getBodyOptGroundContactTangent physicsId world =
-            world.Subsystems.Integrator.GetBodyOptGroundContactTangent physicsId
+        static member internal clearSubsystemsMessages world =
+            World.updateSubsystems (fun is _ -> is.ClearMessages ()) world
 
-        /// Query that the body with the give physics id is on the ground.
-        static member isBodyOnGround physicsId world =
-            world.Subsystems.Integrator.IsBodyOnGround physicsId
+        /// Add a physics message to the world.
+        static member addPhysicsMessage (message : PhysicsMessage) world =
+            World.updateSubsystem (fun is _ -> is.EnqueueMessage message) IntegratorSubsystemName world
 
-        /// Send a message to the physics system to create a physics body.
-        static member createBody (entityAddress : Entity Address) entityId bodyProperties world =
-            let createBodyMessage = CreateBodyMessage { SourceAddress = atooa entityAddress; SourceId = entityId; BodyProperties = bodyProperties }
-            World.addPhysicsMessage createBodyMessage world
+        /// Add a rendering message to the world.
+        static member addRenderMessage (message : RenderMessage) world =
+            World.updateSubsystem (fun rs _ -> rs.EnqueueMessage message) RendererSubsystemName world
 
-        /// Send a message to the physics system to create several physics bodies.
-        static member createBodies (entityAddress : Entity Address) entityId bodyPropertyList world =
-            let createBodiesMessage = CreateBodiesMessage { SourceAddress = atooa entityAddress; SourceId = entityId; BodyPropertyList = bodyPropertyList }
-            World.addPhysicsMessage createBodiesMessage world
-
-        /// Send a message to the physics system to destroy a physics body.
-        static member destroyBody physicsId world =
-            let destroyBodyMessage = DestroyBodyMessage { PhysicsId = physicsId }
-            World.addPhysicsMessage destroyBodyMessage world
-
-        /// Send a message to the physics system to destroy several physics bodies.
-        static member destroyBodies physicsIds world =
-            let destroyBodiesMessage = DestroyBodiesMessage { PhysicsIds = physicsIds }
-            World.addPhysicsMessage destroyBodiesMessage world
-
-        /// Send a message to the physics system to set the position of a body with the given physics id.
-        static member setBodyPosition position physicsId world =
-            let setBodyPositionMessage = SetBodyPositionMessage { PhysicsId = physicsId; Position = position }
-            World.addPhysicsMessage setBodyPositionMessage world
-
-        /// Send a message to the physics system to set the rotation of a body with the given physics id.
-        static member setBodyRotation rotation physicsId world =
-            let setBodyRotationMessage = SetBodyRotationMessage { PhysicsId = physicsId; Rotation = rotation }
-            World.addPhysicsMessage setBodyRotationMessage world
-
-        /// Send a message to the physics system to set the linear velocity of a body with the given physics id.
-        static member setBodyLinearVelocity linearVelocity physicsId world =
-            let setBodyLinearVelocityMessage = SetBodyLinearVelocityMessage { PhysicsId = physicsId; LinearVelocity = linearVelocity }
-            World.addPhysicsMessage setBodyLinearVelocityMessage world
-
-        /// Send a message to the physics system to apply linear impulse to a body with the given physics id.
-        static member applyBodyLinearImpulse linearImpulse physicsId world =
-            let applyBodyLinearImpulseMessage = ApplyBodyLinearImpulseMessage { PhysicsId = physicsId; LinearImpulse = linearImpulse }
-            World.addPhysicsMessage applyBodyLinearImpulseMessage world
-
-        /// Send a message to the physics system to apply force to a body with the given physics id.
-        static member applyBodyForce force physicsId world =
-            let applyBodyForceMessage = ApplyBodyForceMessage { PhysicsId = physicsId; Force = force }
-            World.addPhysicsMessage applyBodyForceMessage world
+        /// Add an audio message to the world.
+        static member addAudioMessage (message : AudioMessage) world =
+            World.updateSubsystem (fun aps _ -> aps.EnqueueMessage message) AudioPlayerSubsystemName world
 
 [<AutoOpen>]
-module WorldRenderModule =
+module WorldCallbacksModule =
 
     type World with
 
-        /// Hint that a rendering asset package with the given name should be loaded. Should be
-        /// used to avoid loading assets at inconvenient times (such as in the middle of game play!)
-        static member hintRenderPackageUse packageName world =
-            let hintRenderPackageUseMessage = HintRenderPackageUseMessage { PackageName = packageName }
-            World.addRenderMessage hintRenderPackageUseMessage world
-            
-        /// Hint that a rendering package should be unloaded since its assets will not be used
-        /// again (or until specified via World.hintRenderPackageUse).
-        static member hintRenderPackageDisuse packageName world =
-            let hintRenderPackageDisuseMessage = HintRenderPackageDisuseMessage { PackageName = packageName }
-            World.addRenderMessage hintRenderPackageDisuseMessage world
-            
-        /// Send a message to the renderer to reload its rendering assets.
-        static member reloadRenderAssets world =
-            let reloadRenderAssetsMessage = ReloadRenderAssetsMessage
-            World.addRenderMessage reloadRenderAssetsMessage world
+        static member internal clearTasks world =
+            let callbacks = { world.Callbacks with Tasks = [] }
+            { world with Callbacks = callbacks }
+
+        static member internal restoreTasks tasks world =
+            let callbacks = { world.Callbacks with Tasks = world.Callbacks.Tasks @ tasks }
+            { world with Callbacks = callbacks }
+
+        /// Add a task to be executed by the engine at the specified task tick.
+        static member addTask task world =
+            let callbacks = { world.Callbacks with Tasks = task :: world.Callbacks.Tasks }
+            { world with Callbacks = callbacks }
+
+        /// Add multiple task to be executed by the engine at the specified task tick.
+        static member addTasks tasks world =
+            let callbacks = { world.Callbacks with Tasks = tasks @ world.Callbacks.Tasks }
+            { world with Callbacks = callbacks }
+
+        /// Add callback state to the world.
+        static member addCallbackState key state world =
+            let callbacks = { world.Callbacks with CallbackStates = Map.add key (state :> obj) world.Callbacks.CallbackStates }
+            { world with Callbacks = callbacks }
+
+        /// Remove callback state from the world.
+        static member removeCallbackState key world =
+            let callbacks = { world.Callbacks with CallbackStates = Map.remove key world.Callbacks.CallbackStates }
+            { world with Callbacks = callbacks }
+
+        /// Get callback state from the world.
+        static member getCallbackState<'a> key world =
+            let state = Map.find key world.Callbacks.CallbackStates
+            state :?> 'a
 
 [<AutoOpen>]
-module WorldAudioModule =
+module WorldComponentsModule =
 
     type World with
 
-        /// Send a message to the audio system to play a song.
-        static member playSong timeToFadeOutSongMs volume song world =
-            let playSongMessage = PlaySongMessage { TimeToFadeOutSongMs = timeToFadeOutSongMs; Volume = volume; Song = song }
-            World.addAudioMessage playSongMessage world
-
-        /// Send a message to the audio system to play a song.
-        static member playSong6 timeToFadeOutSongMs volume songPackageName songAssetName world =
-            let song = { SongPackageName = songPackageName; SongAssetName = songAssetName }
-            World.playSong timeToFadeOutSongMs volume song world
-
-        /// Send a message to the audio system to play a sound.
-        static member playSound volume sound world =
-            let playSoundMessage = PlaySoundMessage { Sound = sound; Volume = volume }
-            World.addAudioMessage playSoundMessage world
-
-        /// Send a message to the audio system to play a sound.
-        static member playSound5 volume soundPackageName soundAssetName world =
-            let sound = { SoundPackageName = soundPackageName; SoundAssetName = soundAssetName }
-            World.playSound volume sound world
-
-        /// Send a message to the audio system to fade out a song.
-        static member fadeOutSong timeToFadeOutSongMs world =
-            let fadeOutSongMessage = FadeOutSongMessage timeToFadeOutSongMs
-            World.addAudioMessage fadeOutSongMessage world
-
-        /// Send a message to the audio system to stop a song.
-        static member stopSong world =
-            World.addAudioMessage StopSongMessage world
-            
-        /// Hint that an audio asset package with the given name should be loaded. Should be used
-        /// to avoid loading assets at inconvenient times (such as in the middle of game play!)
-        static member hintAudioPackageUse packageName world =
-            let hintAudioPackageUseMessage = HintAudioPackageUseMessage { PackageName = packageName }
-            World.addAudioMessage hintAudioPackageUseMessage world
-            
-        /// Hint that an audio package should be unloaded since its assets will not be used again
-        /// (or until specified via a HintAudioPackageUseMessage).
-        static member hintAudioPackageDisuse packageName world =
-            let hintAudioPackageDisuseMessage = HintAudioPackageDisuseMessage { PackageName = packageName }
-            World.addAudioMessage hintAudioPackageDisuseMessage world
-
-        /// Send a message to the audio player to reload its audio assets.
-        static member reloadAudioAssets world =
-            let reloadAudioAssetsMessage = ReloadAudioAssetsMessage
-            World.addAudioMessage reloadAudioAssetsMessage world
+        /// Get the components of the world.
+        static member getComponents world =
+            world.Components
 
 [<AutoOpen>]
-module WorldEventModule =
+module WorldStateModule =
 
     type World with
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapASDE<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (Address.changeType<obj, 's> event.SubscriberAddress, subscriber, event.Data, event)
+        static member private getState world =
+            world.State
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapASD<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (Address.changeType<obj, 's> event.SubscriberAddress, subscriber, event.Data)
+        static member private setState state world =
+            let oldState = world.State
+            let world = { world with State = state }
+            World.publish4 { OldWorldState = oldState } WorldStateChangeEventAddress Game world
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapASE<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (Address.changeType<obj, 's> event.SubscriberAddress, subscriber, event)
+        /// Get the world's tick time.
+        static member getTickTime world =
+            world.State.TickTime
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapADE<'d, 's> (event : 'd Event) (_ : World) =
-            (Address.changeType<obj, 's> event.SubscriberAddress, event.Data, event)
+        static member internal incrementTickTime world =
+            let state = { world.State with TickTime = world.State.TickTime + 1L }
+            World.setState state world
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapSDE<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (subscriber, event.Data, event)
+        /// Get the the liveness state of the world.
+        static member getLiveness world =
+            world.State.Liveness
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapAS<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (Address.changeType<obj, 's> event.SubscriberAddress, subscriber)
+        /// Place the engine into a state such that the app will exit at the end of the current tick.
+        static member exit world =
+            let state = { world.State with Liveness = Exiting }
+            World.setState state world
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapAD<'d, 's> (event : 'd Event) (_ : World) =
-            (Address.changeType<obj, 's> event.SubscriberAddress, event.Data)
+        /// Query that the engine is in game-playing mode.
+        static member isGamePlaying world =
+            Interactivity.isGamePlaying world.State.Interactivity
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapAE<'d, 's> (event : 'd Event) (_ : World) =
-            (Address.changeType<obj, 's> event.SubscriberAddress, event)
+        /// Query that the physics system is running.
+        static member isPhysicsRunning world =
+            Interactivity.isPhysicsRunning world.State.Interactivity
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapSD<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (subscriber, event.Data)
+        /// Get the interactivity state of the world.
+        static member getInteractivity world =
+            world.State.Interactivity
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapSE<'d, 's> (event : 'd Event) world =
-            let subscriber = World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-            (subscriber, event)
+        /// Set the level of the world's interactivity.
+        static member setInteractivity interactivity world =
+            let state = { world.State with Interactivity = interactivity }
+            World.setState state world
 
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapDE<'d, 's> (event : 'd Event) (_ : World) =
-            (event.Data, event)
-
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapA<'d, 's> (event : 'd Event) (_ : World) =
-            Address.changeType<obj, 's> event.SubscriberAddress
-
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapS<'d, 's> (event : 'd Event) world =
-            World.getOptSimulant (atoua event.SubscriberAddress) world |> Option.get |> Simulant.toGeneric<'s>
-
-        /// Unwrap commonly-useful values of an event.
-        static member unwrapD<'d, 's> (event : 'd Event) (_ : World) =
-            event.Data
+        /// Update the the level of the world's interactivity.
+        static member updateInteractivity updater world =
+            let interactivity = updater <| World.getInteractivity world
+            World.setInteractivity interactivity world
             
-        /// Ignore all handled events.
-        static member handleAsPass (_ : 'd Event) (world : World) =
-            (Cascade, world)
+        /// Get the a value from the camera used to view the world.
+        static member getCameraBy by world =
+            by world.State.Camera
 
-        /// Swallow all handled events.
-        static member handleAsSwallow<'d> (_ : 'd Event) (world : World) =
-            (Resolve, world)
-        
-        /// Handle event by exiting app.
-        static member handleAsExit<'d> (_ : 'd Event) (world : World) =
-            (Resolve, World.exit world)
+        /// Get the camera used to view the world.
+        static member getCamera world =
+            World.getCameraBy id world
+
+        static member private setCamera camera world =
+            let state = { world.State with Camera = camera }
+            World.setState state world
+
+        /// Update the camera used to view the world.
+        static member updateCamera updater world =
+            let camera = updater <| World.getCamera world
+            World.setCamera camera world
+
+        /// Get the current destination screen if a screen transition is currently underway.
+        static member getOptScreenTransitionDestination world =
+            world.State.OptScreenTransitionDestination
+
+        static member internal setOptScreenTransitionDestination destination world =
+            let state = { world.State with OptScreenTransitionDestination = destination }
+            World.setState state world
+
+        /// Get the asset metadata map.
+        static member getAssetMetadataMap world =
+            world.State.AssetMetadataMap
+
+        static member internal setAssetMetadataMap assetMetadataMap world =
+            let state = { world.State with AssetMetadataMap = assetMetadataMap }
+            World.setState state world
+
+        static member internal setOverlayer overlayer world =
+            let state = { world.State with Overlayer = overlayer }
+            World.setState state world
+
+        /// Get the user state of the world, casted to 'u.
+        static member getUserState world : 'u =
+            world.State.UserState :?> 'u
+
+        static member private setUserState (userState : 'u) world =
+            let state = { world.State with UserState = userState }
+            World.setState state world
+
+        /// Update the user state of the world.
+        static member updateUserState (updater : 'u -> 'v) world =
+            let state = World.getUserState world
+            let state = updater state
+            World.setUserState state world

@@ -1,7 +1,11 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.ComponentModel
 open System.Collections.Generic
+open FSharpx.Collections
 open FarseerPhysics
 open FarseerPhysics.Common
 open FarseerPhysics.Dynamics
@@ -132,7 +136,7 @@ module PhysicsModule =
     /// A message from the physics system describing a body collision that took place.
     type [<StructuralEquality; NoComparison>] BodyCollisionMessage =
         { SourceAddress : obj Address
-          Source2Address : obj Address
+          CollideeAddress : obj Address
           Normal : Vector2
           Speed : single }
 
@@ -164,7 +168,7 @@ module PhysicsModule =
         | BodyCollisionMessage of BodyCollisionMessage
         | BodyTransformMessage of BodyTransformMessage
 
-    /// The physics integrator. Represent the physics system in Nu.
+    /// The physics integrator. Represents the physics system in Nu.
     type IIntegrator =
         /// Query that the integrator contain the body with the given physics id.
         abstract BodyExists : PhysicsId -> bool
@@ -178,16 +182,21 @@ module PhysicsModule =
         abstract GetBodyOptGroundContactNormal : PhysicsId -> Vector2 option
         /// Try to get a contact tangent where the body with the given physics id is touching the ground.
         abstract GetBodyOptGroundContactTangent : PhysicsId -> Vector2 option
-        /// Query that the body with the give physics id is on the ground.
-        abstract IsBodyOnGround : PhysicsId -> bool
+        /// Query that the body with the given physics id is on the ground.
+        abstract BodyOnGround : PhysicsId -> bool
+        /// Clear all of the physics messages that have been enqueued.
+        abstract ClearMessages : unit -> IIntegrator
+        /// Enqueue a message from an external source.
+        abstract EnqueueMessage : PhysicsMessage -> IIntegrator
         /// Integrate (or 'tick') the physics system one frame.
-        abstract Integrate : PhysicsMessage rQueue -> IntegrationMessage list
+        abstract Integrate : unit -> IntegrationMessage list * IIntegrator
 
     /// The primary implementation of IIntegrator.
     type [<ReferenceEquality>] Integrator =
         private
             { PhysicsContext : Dynamics.World
               Bodies : BodyDictionary
+              PhysicsMessages : PhysicsMessage Queue
               IntegrationMessages : IntegrationMessage List
               FarseerCautionMode : bool // HACK: ensures two bodies aren't created in the same position, thus evading a Farseer bug
               mutable RebuildingHack : bool }
@@ -219,14 +228,11 @@ module PhysicsModule =
             | Dynamic -> Dynamics.BodyType.Dynamic
 
         static member private handleCollision
-            integrator
-            (fixture : Dynamics.Fixture)
-            (fixture2 : Dynamics.Fixture)
-            (contact : Dynamics.Contacts.Contact) =
+            integrator (fixture : Dynamics.Fixture) (fixture2 : Dynamics.Fixture) (contact : Dynamics.Contacts.Contact) =
             let normal = fst <| contact.GetWorldManifold ()
             let bodyCollisionMessage =
                 { SourceAddress = fixture.Body.UserData :?> obj Address
-                  Source2Address = fixture2.Body.UserData :?> obj Address
+                  CollideeAddress = fixture2.Body.UserData :?> obj Address
                   Normal = Vector2 (normal.X, normal.Y)
                   Speed = contact.TangentSpeed * PhysicsToPixelRatio }
             let integrationMessage = BodyCollisionMessage bodyCollisionMessage
@@ -404,9 +410,8 @@ module PhysicsModule =
                 integrator.Bodies.Clear ()
                 integrator.IntegrationMessages.Clear ()
 
-        static member private handlePhysicsMessages (physicsMessages : PhysicsMessage rQueue) integrator =
-            let physicsMessagesRev = List.rev physicsMessages
-            for physicsMessage in physicsMessagesRev do
+        static member private handlePhysicsMessages physicsMessages integrator =
+            for physicsMessage in physicsMessages do
                 Integrator.handlePhysicsMessage integrator physicsMessage
             integrator.RebuildingHack <- false
 
@@ -425,16 +430,17 @@ module PhysicsModule =
             let integrator =
                 { PhysicsContext = FarseerPhysics.Dynamics.World (Integrator.toPhysicsV2 gravity)
                   Bodies = BodyDictionary HashIdentity.Structural
+                  PhysicsMessages = Queue.empty
                   IntegrationMessages = List<IntegrationMessage> ()
                   FarseerCautionMode = farseerCautionMode
                   RebuildingHack = false }
             integrator :> IIntegrator
 
         interface IIntegrator with
-        
+
             member integrator.BodyExists physicsId =
                 integrator.Bodies.ContainsKey physicsId
-        
+
             member integrator.GetBodyContactNormals physicsId =
                 let contacts = Integrator.getBodyContacts physicsId integrator
                 List.map
@@ -442,11 +448,11 @@ module PhysicsModule =
                         let normal = fst <| contact.GetWorldManifold ()
                         Vector2 (normal.X, normal.Y))
                     contacts
-        
+
             member integrator.GetBodyLinearVelocity physicsId =
                 let body = integrator.Bodies.[physicsId]
                 Integrator.toPixelV2 body.LinearVelocity
-            
+
             member integrator.GetBodyGroundContactNormals physicsId =
                 let normals = (integrator :> IIntegrator).GetBodyContactNormals physicsId
                 List.filter
@@ -454,7 +460,7 @@ module PhysicsModule =
                         let theta = Vector2.Dot (normal, Vector2.UnitY) |> double |> Math.Acos |> Math.Abs
                         theta < Math.PI * 0.25)
                     normals
-            
+
             member integrator.GetBodyOptGroundContactNormal physicsId =
                 let groundNormals = (integrator :> IIntegrator).GetBodyGroundContactNormals physicsId
                 match groundNormals with
@@ -462,23 +468,34 @@ module PhysicsModule =
                 | _ :: _ ->
                     let averageNormal = List.reduce (fun normal normal2 -> (normal + normal2) * 0.5f) groundNormals
                     Some averageNormal
-            
+
             member integrator.GetBodyOptGroundContactTangent physicsId =
                 match (integrator :> IIntegrator).GetBodyOptGroundContactNormal physicsId with
                 | Some normal -> Some <| Vector2 (normal.Y, -normal.X)
                 | None -> None
-            
-            member integrator.IsBodyOnGround physicsId =
+
+            member integrator.BodyOnGround physicsId =
                 let groundNormals = (integrator :> IIntegrator).GetBodyGroundContactNormals physicsId
                 not <| List.isEmpty groundNormals
-            
-            member integrator.Integrate physicsMessages =
+
+            member integrator.ClearMessages () =
+                let integrator = { integrator with PhysicsMessages = Queue.empty }
+                integrator :> IIntegrator
+
+            member integrator.EnqueueMessage physicsMessage =
+                let physicsMessages = Queue.conj physicsMessage integrator.PhysicsMessages
+                let integrator = { integrator with PhysicsMessages = physicsMessages }
+                integrator :> IIntegrator
+
+            member integrator.Integrate () =
+                let physicsMessages = integrator.PhysicsMessages
+                let integrator = { integrator with PhysicsMessages = Queue.empty }
                 Integrator.handlePhysicsMessages physicsMessages integrator
                 integrator.PhysicsContext.Step PhysicsStepRate
                 Integrator.createTransformMessages integrator
                 let messages = List.ofSeq integrator.IntegrationMessages
                 integrator.IntegrationMessages.Clear ()
-                messages
+                (messages, integrator :> IIntegrator)
 
     /// The mock implementation of IIntegrator.
     type MockIntegrator =
@@ -490,8 +507,10 @@ module PhysicsModule =
             member integrator.GetBodyGroundContactNormals _ = failwith "No bodies in MockIntegrator"
             member integrator.GetBodyOptGroundContactNormal _ = failwith "No bodies in MockIntegrator"
             member integrator.GetBodyOptGroundContactTangent _ = failwith "No bodies in MockIntegrator"
-            member integrator.IsBodyOnGround _ = failwith "No bodies in MockIntegrator"
-            member integrator.Integrate _ = []
+            member integrator.BodyOnGround _ = failwith "No bodies in MockIntegrator"
+            member integrator.ClearMessages () = integrator :> IIntegrator
+            member integrator.EnqueueMessage _ = integrator :> IIntegrator
+            member integrator.Integrate () = ([], integrator :> IIntegrator)
 
 [<RequireQualifiedAccess>]
 module Physics =

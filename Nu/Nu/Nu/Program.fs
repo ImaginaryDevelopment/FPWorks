@@ -1,11 +1,18 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open Nu
+open Nu.Constants
 module Program =
 
+    (* TODO: investigate NuEdit extensibility mechanism. *)
+
     (* WISDOM - Dealing with different device resolutions - Instead of rendering each component
-    scaled to a back-buffer of a varying size, render each component unscalws to a off-screen
-    buffer of a static size and then blit that with scaling to the back-buffer. *)
+    scaled to a back-buffer of a varying size, render each component unscaled to a off-screen
+    buffer of a static size and then blit that with scaling to the back-buffer. NOTE: this only
+    applies to 2D ~ will not apply to 3D once implemented in Nu (for obvious reasons). *)
 
     (* WISDOM: From benchmarks. it looks like our mobile target will cost us anywhere from a 25% to
     50% decrease in speed as compared to the dev machine. However, this can be mitigated in a few
@@ -21,8 +28,6 @@ module Program =
     1.2x gain - optimize locality of address usage
     1.2x gain - render tiles layers to their own buffer so that each whole layer can be blitted directly with a single draw call (though this might cause overdraw).
     ? gain - avoid rendering clear tiles! *)
-
-    (* WISDOM: Program types and behavior should be closed where possible and open where necessary. *)
 
     (* WISDOM: On avoiding threads where possible...
     
@@ -45,7 +50,9 @@ module Program =
     (* WISDOM: On threading physics...
     
     A simulation that would put physics on another thread should likely do so in a different app
-    domain with communication via .NET remoting to make 100% sure that no sharing is happening. *)
+    domain with communication via .NET remoting to make 100% sure that no sharing is happening.
+    This should keep debugging easy and even possibly give a boost to GC latency what with
+    spreading collection pauses across two separate collectors. *)
 
     (* IDEA: Simplified networking...
 
@@ -54,8 +61,32 @@ module Program =
     players and messages for rendering / audio will go back to them.
 
     Perhaps not realistic, but just an idea. *)
-    
-    // apparently a side-effect is needed to avoid the empty program warning
-    Console.Write "Running Nu.exe"
 
-    DesyncTests.desyncWorks ()
+    (* IDEA: it was suggested that time-travel debugging a la Elm or http://vimeo.com/36579366
+    would be appropriate to this engine given its pure functional nature. However, due to the
+    imperative nature of the physics system, it could be problematic. However again, that doesn't
+    mean the idea isn't worth pursuing for while it might not work perfectly in all usage
+    scenarios, it may well be of sufficient value. Additionally, on the possible occasion that the
+    current physics engine be replaceable with pure functional one, improvements to the feature may
+    be implementable in time. *)
+
+    (* IDEA: consider disabling Tick events as the way to pause gameplay. *)
+
+    (* IDEA: Faster feedback / iteration times with Edit & Continue.
+    
+    Edit & Continue is a God-send to languages that support it. Unfortunately, F# does not.
+    
+    However, it was pointed out to me by Andrea Magnorsky that some amount of hot-swapping of F#
+    code is currently acheived in the Onikira: Demon Killer by cordoning F# code behind dynamically
+    loaded .NET assemibles. This seems like it would also be applicable with Nu currently since
+    it also uses a plug-in model. On the other hand, I was informed that step-debugging for this
+    hot-loaded code was not yet working (and I'm not sure if it could without further
+    investigation.
+    
+    To me, the real solution is a proper implementation of Edit & Continue in F#. However, that is
+    something over which I have very little control over its implementation barring spending months
+    (at least) on implementing it in the F# compiler myself. *)
+    
+    let [<EntryPoint; STAThread>] main _ =
+        Console.Write "Running Nu.exe"
+        SuccessExitCode

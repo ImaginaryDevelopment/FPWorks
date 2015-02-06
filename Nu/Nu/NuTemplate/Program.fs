@@ -1,9 +1,16 @@
 ﻿namespace $safeprojectname$
+open System
+open FSharpx
 open SDL2
+open OpenTK
 open Prime
 open Nu
 open Nu.Constants
 open Nu.WorldConstants
+open Nu.Observation
+open Nu.Chain
+
+// this is the main module for our program.
 module Program =
     
     // this is a plugin for the Nu game engine by which user-defined dispatchers, facets, and other
@@ -14,7 +21,7 @@ module Program =
         inherit NuPlugin ()
 
     // this the entry point for the your Nu application
-    let [<EntryPoint>] main _ =
+    let [<EntryPoint; STAThread>] main _ =
 
         // this initializes miscellaneous values required by the engine. This should always be the
         // first line in your game program.

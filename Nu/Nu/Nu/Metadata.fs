@@ -1,4 +1,7 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.ComponentModel
 open System.Collections.Generic
@@ -19,7 +22,7 @@ module MetadataModule =
     /// full asset loaded into memory.
     type [<StructuralEquality; NoComparison>] AssetMetadata =
         | TextureMetadata of Vector2i
-        | TileMapMetadata of string * Image list * TmxMap
+        | TileMapMetadata of string * AssetTag list * TmxMap
         | SoundMetadata
         | SongMetadata
         | OtherMetadata of obj
@@ -36,10 +39,10 @@ module Metadata =
 
     let private getTileSetProperties (tileSet : TmxTileset) =
         let properties = tileSet.Properties
-        try { ImagePackageName = properties.["PackageName"]
-              ImageAssetName = properties.["ImageAssetName"] }
+        try { PackageName = properties.["PackageName"]
+              AssetName = properties.["ImageAssetName"] }
         with :? KeyNotFoundException ->
-            let errorMessage = "TileSet '" + tileSet.Name + "' missing one or more properties (PackageName or ImageAssetName)."
+            let errorMessage = "TileSet '" + tileSet.Name + "' missing one or more properties (PackageName or AssetName)."
             raise <| TileSetPropertyNotFoundException errorMessage
 
     let private generateTextureMetadata asset =
@@ -96,15 +99,16 @@ module Metadata =
     let private generateAssetMetadataSubmap (packageNode : XmlNode) =
         let packageName = (packageNode.Attributes.GetNamedItem NameAttributeName).InnerText
         let assets =
-            List.fold
-                (fun assets (node : XmlNode) ->
-                    match node.Name with
-                    | AssetNodeName -> match Assets.tryLoadAssetFromAssetNode node with Some asset -> asset :: assets | None -> assets
-                    | AssetsNodeName -> match Assets.tryLoadAssetsFromAssetsNode true node with Some assets' -> assets' @ assets | None -> assets
-                    | _ -> [])
+            Seq.fold (fun assetsRev (node : XmlNode) ->
+                match node.Name with
+                | AssetNodeName -> match Assets.tryLoadAssetFromAssetNode node with Some asset -> asset :: assetsRev | None -> assetsRev
+                | AssetsNodeName -> match Assets.tryLoadAssetsFromAssetsNode true node with Some assets' -> List.rev assets' @ assetsRev | None -> assetsRev
+                | CommentNodeName -> assetsRev
+                | _ -> [])
                 []
-                (List.ofSeq <| packageNode.OfType<XmlNode> ())
-        let submap = Map.ofListBy (fun asset -> generateAssetMetadata asset) assets
+                (packageNode.OfType<XmlNode> ()) |>
+            List.rev
+        let submap = Map.ofSeqBy (fun asset -> generateAssetMetadata asset) assets
         (packageName, submap)
 
     let private generateAssetMetadataMap packageNodes =

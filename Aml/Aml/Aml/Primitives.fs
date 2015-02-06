@@ -1,5 +1,5 @@
 ﻿// Aml - A Modular Language.
-// Copyright (C) Bryan Edds, 2012-2014.
+// Copyright (C) Bryan Edds, 2012-2015.
 
 namespace Aml
 open System
@@ -790,10 +790,10 @@ module Primitives =
     let floatAcos (x : single) = single (Math.Acos (float x))
     let floatAtan (x : single) = single (Math.Atan (float x))
     let floatLogN (x : single) (y : single) = single (Math.Log (float x, float y))
-    let floatRoot (x : single) (y : single) = let y' = 1.0f / y in single (Math.Pow (float x, float y'))
+    let floatRoot (x : single) (y : single) = let z = 1.0f / y in single (Math.Pow (float x, float z))
 
     let doubleLogN x y = Math.Log (x, y)
-    let doubleRoot x y = let y' = 1.0 / y in Math.Pow (x, y')
+    let doubleRoot x y = let z = 1.0 / y in Math.Pow (x, z)
 
     let ViolationType = makeType ViolationTypeStr None
     let BooleanType = makeType BooleanTypeStr None

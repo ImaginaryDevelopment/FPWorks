@@ -1,13 +1,15 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 
 [<AutoOpen>]
 module OverlayRouterModule =
 
     /// Maps from dispatcher names to opt overlay names.
-    type OverlayRouter =
-        Map<string, string option>
+    type OverlayRouter = Map<string, string option>
 
-[<AutoOpen>]
+[<RequireQualifiedAccess>]
 module OverlayRouter =
 
     /// Make an OverlayRouter.

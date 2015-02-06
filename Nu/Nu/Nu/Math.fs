@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2014.
+// Copyright (C) Bryan Edds, 2013-2015.
 
 namespace Nu
 open System
@@ -29,18 +29,22 @@ module MathModule =
     /// Converts Vector2 types.
     type Vector2Converter () =
         inherit TypeConverter ()
+
         override this.CanConvertTo (_, destType) =
             destType = typeof<string> ||
             destType = typeof<Vector2>
+
         override this.ConvertTo (_, culture, source, destType) =
             if destType = typeof<string> then
                 let v2 = source :?> Vector2
                 String.Format (culture, "{0}, {1}", v2.X, v2.Y) :> obj
             elif destType = typeof<Vector2> then source
             else failwith "Invalid Vector2Converter conversion to source."
+
         override this.CanConvertFrom (_, sourceType) =
             sourceType = typeof<string> ||
             sourceType = typeof<Vector2>
+
         override this.ConvertFrom (_, _, source) =
             match source with
             | :? string ->
@@ -54,18 +58,22 @@ module MathModule =
     /// Converts Vector3 types.
     type Vector3Converter () =
         inherit TypeConverter ()
+
         override this.CanConvertTo (_, destType) =
             destType = typeof<string> ||
             destType = typeof<Vector3>
+
         override this.ConvertTo (_, culture, source, destType) =
             if destType = typeof<string> then
                 let v3 = source :?> Vector3
                 String.Format (culture, "{0}, {1}, {2}", v3.X, v3.Y, v3.Z) :> obj
             elif destType = typeof<Vector3> then source
             else failwith "Invalid Vector3Converter conversion to source."
+
         override this.CanConvertFrom (_, sourceType) =
             sourceType = typeof<string> ||
             sourceType = typeof<Vector3>
+
         override this.ConvertFrom (_, _, source) =
             match source with
             | :? string ->
@@ -79,18 +87,22 @@ module MathModule =
     /// Converts Vector4 types.
     type Vector4Converter () =
         inherit TypeConverter ()
+
         override this.CanConvertTo (_, destType) =
             destType = typeof<string> ||
             destType = typeof<Vector4>
+
         override this.ConvertTo (_, culture, source, destType) =
             if destType = typeof<string> then
                 let v4 = source :?> Vector4
                 String.Format (culture, "{0}, {1}, {2}, {3}", v4.X, v4.Y, v4.Z, v4.W) :> obj
             elif destType = typeof<Vector4> then source
             else failwith "Invalid Vector4Converter conversion to source."
+
         override this.CanConvertFrom (_, sourceType) =
             sourceType = typeof<string> ||
             sourceType = typeof<Vector4>
+
         override this.ConvertFrom (_, _, source) =
             match source with
             | :? string ->
@@ -140,12 +152,11 @@ module Math =
 
     /// Snap an radian value to an offset.
     let snapR offset value =
-        value |>
-            mul RadiansToDegreesF |>
-            int |>
-            snap offset |>
-            single |>
-            mul DegreesToRadiansF
+        mul RadiansToDegreesF value |>
+        int |>
+        snap offset |>
+        single |>
+        mul DegreesToRadiansF
 
     /// Snap an single float value to an offset.
     let snapF offset (value : single) =
@@ -162,11 +173,11 @@ module Math =
 
     /// Queries that a point is within the given bounds.
     let isPointInBounds (point : Vector2) (bounds : Vector4) =
-        not
-            (point.X < bounds.X ||
-             point.X > bounds.Z ||
-             point.Y < bounds.Y ||
-             point.Y > bounds.W)
+        not (
+            point.X < bounds.X ||
+            point.X > bounds.Z ||
+            point.Y < bounds.Y ||
+            point.Y > bounds.W)
 
     /// Queries that a point is within the given bounds.
     let isPointInBounds3 (point : Vector2) (boxPos : Vector2) (boxSize : Vector2) =
@@ -174,9 +185,9 @@ module Math =
 
     /// Queries that a bounds is within the given bounds.
     let isBoundsInBounds (bounds : Vector4) (bounds2 : Vector4) =
-        not
-            (bounds.X > bounds2.Z || bounds.Z < bounds2.X ||
-             bounds.Y > bounds2.W || bounds.W < bounds2.Y)
+        not (
+            bounds.X > bounds2.Z || bounds.Z < bounds2.X ||
+            bounds.Y > bounds2.W || bounds.W < bounds2.Y)
 
     /// Queries that a bounds is within the given bounds.
     let isBoundsInBounds3 (position : Vector2) (size : Vector2) bounds =

@@ -63,21 +63,20 @@
     <PostBuildEvent>"$(ProjectDir)..\..\..\Nu\Nu\NuPipe\bin\$(ConfigurationName)\NuPipe.exe" "$(ProjectDir)\" "$(TargetDir)\" "$(ProjectDir)Refinement" False</PostBuildEvent>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Core.fs" />
-    <Compile Include="Constants.fs" />
+    <Compile Include="InfinityConstants.fs" />
+    <Compile Include="InfinityMath.fs" />
     <Compile Include="MetaMap.fs" />
     <Compile Include="FieldMap.fs" />
     <Compile Include="FieldDispatcher.fs" />
     <Compile Include="CharacterState.fs" />
     <Compile Include="CharacterFacets.fs" />
-    <Compile Include="CharacterActivity.fs" />
     <Compile Include="CharacterDispatcher.fs" />
     <Compile Include="EnemyDispatcher.fs" />
     <Compile Include="PlayerDispatcher.fs" />
     <Compile Include="OccupationMap.fs" />
     <Compile Include="GameplayDispatcher.fs" />
-    <Compile Include="InfinityRpgDispatcher.fs" />
-    <Compile Include="ComponentFactory.fs" />
+    <Compile Include="InfinityDispatcher.fs" />
+    <Compile Include="InfinityPlugin.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />
     <Content Include="AssetGraph.xml">
@@ -100,6 +99,9 @@
     </ProjectReference>
     <Reference Include="FarseerPhysics">
       <HintPath>..\..\..\Nu\Farseer\FarseerPhysics.dll</HintPath>
+    </Reference>
+    <Reference Include="FSharpx.Core">
+      <HintPath>..\..\..\Prime\FSharpx.Core\FSharpx.Core.dll</HintPath>
     </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">

@@ -1,7 +1,11 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.IO
 open System.ComponentModel
+open FSharpx.Collections
 open SDL2
 open Prime
 open Nu
@@ -10,47 +14,16 @@ open Nu.Constants
 [<AutoOpen>]
 module AudioModule =
 
-    /// Describes a song asset.
-    type [<StructuralEquality; NoComparison; XDefaultValue (DefaultSongValue)>]
-        Song =
-        { SongPackageName : string
-          SongAssetName : string }
-        
-        /// Convert a song asset to an asset location.
-        static member toAssetTag song =
-            { PackageName = song.SongPackageName
-              AssetName = song.SongAssetName }
-        
-        /// Convert an asset location to a song asset.
-        static member fromAssetTag (assetTag : AssetTag) =
-            { SongPackageName = assetTag.PackageName
-              SongAssetName = assetTag.AssetName }
-
-    /// Describes a sound asset.
-    type [<StructuralEquality; NoComparison; XDefaultValue (DefaultSoundValue)>] Sound =
-        { SoundPackageName : string
-          SoundAssetName : string }
-        
-        /// Convert a sound asset to an asset location.
-        static member toAssetTag sound =
-            { PackageName = sound.SoundPackageName
-              AssetName = sound.SoundAssetName }
-        
-        /// Convert an asset location to an image asset.
-        static member fromAssetTag (assetTag : AssetTag) =
-            { SoundPackageName = assetTag.PackageName
-              SoundAssetName = assetTag.AssetName }
-
     /// A message to the audio system to play a song.
     type [<StructuralEquality; NoComparison>] PlaySongMessage =
         { TimeToFadeOutSongMs : int
           Volume : single
-          Song : Song }
+          Song : AssetTag }
 
     /// A message to the audio system to play a sound.
     type [<StructuralEquality; NoComparison>] PlaySoundMessage =
         { Volume : single
-          Sound : Sound }
+          Sound : AssetTag }
           
     /// Hint that an audio asset package with the given name should be loaded. Should be used to
     /// avoid loading assets at inconvenient times (such as in the middle of game play!)
@@ -79,14 +52,19 @@ module AudioModule =
 
     /// The audio player. Represents the audio system of Nu generally.
     type IAudioPlayer =
+        /// Clear all of the audio messages that have been enqueued.
+        abstract ClearMessages : unit -> IAudioPlayer
+        /// Enqueue a message from an external source.
+        abstract EnqueueMessage : AudioMessage -> IAudioPlayer
         /// 'Play' the audio system. Must be called once per frame.
-        abstract Play : AudioMessage list -> IAudioPlayer
+        abstract Play : unit -> IAudioPlayer
 
     /// The primary implementation of IAudioPlayer.
     type [<ReferenceEquality>] AudioPlayer =
         private
             { AudioContext : unit // audio context, interestingly, is global. Good luck encapsulating that!
               AudioAssetMap : AudioAsset AssetMap
+              AudioMessages : AudioMessage Queue
               OptCurrentSong : PlaySongMessage option
               OptNextPlaySong : PlaySongMessage option
               AssetGraphFilePath : string }
@@ -146,55 +124,54 @@ module AudioModule =
             (audioPlayer, Option.bind (fun assetMap -> Map.tryFind assetTag.AssetName assetMap) optAssetMap)
     
         static member private playSong playSongMessage audioPlayer =
-            let songAssetTag = Song.toAssetTag playSongMessage.Song
-            let (audioPlayer', optAudioAsset) = AudioPlayer.tryLoadAudioAsset songAssetTag audioPlayer
+            let song = playSongMessage.Song
+            let (audioPlayer, optAudioAsset) = AudioPlayer.tryLoadAudioAsset song audioPlayer
             match optAudioAsset with
-            | Some (WavAsset _) -> note <| "Cannot play wav file as song '" + acstring songAssetTag + "'."
+            | Some (WavAsset _) -> note <| "Cannot play wav file as song '" + acstring song + "'."
             | Some (OggAsset oggAsset) ->
                 ignore <| SDL_mixer.Mix_VolumeMusic (int <| playSongMessage.Volume * single SDL_mixer.MIX_MAX_VOLUME)
-                ignore <| SDL_mixer.Mix_PlayMusic (oggAsset, -1)
-            | None -> note <| "PlaySongMessage failed due to unloadable assets for '" + acstring songAssetTag + "'."
-            { audioPlayer' with OptCurrentSong = Some playSongMessage }
+                ignore <| SDL_mixer.Mix_FadeInMusic (oggAsset, -1, 256) // Mix_PlayMusic seems to somtimes cause audio 'popping' when starting a song, so a fade is used instead...
+            | None -> note <| "PlaySongMessage failed due to unloadable assets for '" + acstring song + "'."
+            { audioPlayer with OptCurrentSong = Some playSongMessage }
     
         static member private handleHintAudioPackageUse (hintPackageUse : HintAudioPackageUseMessage) audioPlayer =
             AudioPlayer.tryLoadAudioPackage hintPackageUse.PackageName audioPlayer
     
         static member private handleHintAudioPackageDisuse (hintPackageDisuse : HintAudioPackageDisuseMessage) audioPlayer =
             let packageName = hintPackageDisuse.PackageName
-            let optAssets = Map.tryFind packageName audioPlayer.AudioAssetMap
-            match optAssets with
+            match Map.tryFind packageName audioPlayer.AudioAssetMap with
             | Some assets ->
                 // all sounds / music must be halted because one of them might be playing during unload
                 // (which is very bad according to the API docs).
                 AudioPlayer.haltSound ()
-                for asset in Map.toValueList assets do
-                    match asset with
+                for asset in assets do
+                    match asset.Value with
                     | WavAsset wavAsset -> SDL_mixer.Mix_FreeChunk wavAsset
                     | OggAsset oggAsset -> SDL_mixer.Mix_FreeMusic oggAsset
                 { audioPlayer with AudioAssetMap = Map.remove packageName audioPlayer.AudioAssetMap }
             | None -> audioPlayer
     
         static member private handlePlaySound playSoundMessage audioPlayer =
-            let soundAssetTag = Sound.toAssetTag playSoundMessage.Sound
-            let (audioPlayer, optAudioAsset) = AudioPlayer.tryLoadAudioAsset soundAssetTag audioPlayer
+            let sound = playSoundMessage.Sound
+            let (audioPlayer, optAudioAsset) = AudioPlayer.tryLoadAudioAsset sound audioPlayer
             match optAudioAsset with
             | Some (WavAsset wavAsset) ->
                 ignore <| SDL_mixer.Mix_VolumeChunk (wavAsset, int <| playSoundMessage.Volume * single SDL_mixer.MIX_MAX_VOLUME)
                 ignore <| SDL_mixer.Mix_PlayChannel (-1, wavAsset, 0)
-            | Some (OggAsset _) -> note <| "Cannot play ogg file as sound '" + acstring soundAssetTag + "'."
-            | None -> note <| "PlaySoundMessage failed due to unloadable assets for '" + acstring soundAssetTag + "'."
+            | Some (OggAsset _) -> note <| "Cannot play ogg file as sound '" + acstring sound + "'."
+            | None -> note <| "PlaySoundMessage failed due to unloadable assets for '" + acstring sound + "'."
             audioPlayer
     
         static member private handlePlaySong playSongMessage audioPlayer =
             if SDL_mixer.Mix_PlayingMusic () = 1 then
-                if audioPlayer.OptCurrentSong = Some playSongMessage then audioPlayer
-                else
+                if audioPlayer.OptCurrentSong <> Some playSongMessage then
                     if  playSongMessage.TimeToFadeOutSongMs <> 0 &&
                         not (SDL_mixer.Mix_FadingMusic () = SDL_mixer.Mix_Fading.MIX_FADING_OUT) then
                         ignore <| SDL_mixer.Mix_FadeOutMusic playSongMessage.TimeToFadeOutSongMs
                     else
                         ignore <| SDL_mixer.Mix_HaltMusic ()
                     { audioPlayer with OptNextPlaySong = Some playSongMessage }
+                else audioPlayer
             else AudioPlayer.playSong playSongMessage audioPlayer
     
         static member private handleFadeOutSong timeToFadeOutSongMs audioPlayer =
@@ -228,8 +205,8 @@ module AudioModule =
             | StopSongMessage -> AudioPlayer.handleStopSong audioPlayer
             | ReloadAudioAssetsMessage -> AudioPlayer.handleReloadAudioAssets audioPlayer
     
-        static member private handleAudioMessages (audioMessages : AudioMessage rQueue) audioPlayer =
-            List.fold AudioPlayer.handleAudioMessage audioPlayer (List.rev audioMessages)
+        static member private handleAudioMessages audioMessages audioPlayer =
+            Queue.fold AudioPlayer.handleAudioMessage audioPlayer audioMessages
     
         static member private tryUpdateCurrentSong audioPlayer =
             if SDL_mixer.Mix_PlayingMusic () = 1 then audioPlayer
@@ -254,6 +231,7 @@ module AudioModule =
             let audioPlayer =
                 { AudioContext = ()
                   AudioAssetMap = Map.empty
+                  AudioMessages = Queue.empty
                   OptCurrentSong = None
                   OptNextPlaySong = None
                   AssetGraphFilePath = assetGraphFilePath }
@@ -261,7 +239,18 @@ module AudioModule =
 
         interface IAudioPlayer with
 
-            member audioPlayer.Play audioMessages =
+            member audioPlayer.ClearMessages () =
+                let audioPlayer = { audioPlayer with AudioMessages = Queue.empty }
+                audioPlayer :> IAudioPlayer
+
+            member audioPlayer.EnqueueMessage audioMessage =
+                let audioMessages = Queue.conj audioMessage audioPlayer.AudioMessages
+                let audioPlayer = { audioPlayer with AudioMessages = audioMessages }
+                audioPlayer :> IAudioPlayer
+
+            member audioPlayer.Play () =
+                let audioMessages = audioPlayer.AudioMessages
+                let audioPlayer = { audioPlayer with AudioMessages = Queue.empty }
                 let audioPlayer = AudioPlayer.handleAudioMessages audioMessages audioPlayer
                 let audioPlayer = AudioPlayer.updateAudioPlayer audioPlayer
                 audioPlayer :> IAudioPlayer
@@ -270,4 +259,6 @@ module AudioModule =
     type [<ReferenceEquality>] MockAudioPlayer =
         { MockAudioPlayer : unit }
         interface IAudioPlayer with
-            member audioPlayer.Play _ = audioPlayer :> IAudioPlayer
+            member audioPlayer.ClearMessages () = audioPlayer :> IAudioPlayer
+            member audioPlayer.EnqueueMessage _ = audioPlayer :> IAudioPlayer
+            member audioPlayer.Play () = audioPlayer :> IAudioPlayer

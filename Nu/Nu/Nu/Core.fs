@@ -1,5 +1,5 @@
 ﻿// Nu Game Engine.
-// Copyright (C) Bryan Edds, 2013-2014.
+// Copyright (C) Bryan Edds, 2013-2015.
 
 namespace Nu
 open System
@@ -19,6 +19,10 @@ module CoreModule =
     type Liveness =
         | Running
         | Exiting
+        
+    /// Sequences two functions like Haskell ($).
+    /// Same as the (^) operator found in Prime, but placed here to expose it directly from Nu.
+    let (^) = (^)
 
 [<RequireQualifiedAccess>]
 module Core =

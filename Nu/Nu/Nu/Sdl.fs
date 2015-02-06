@@ -1,4 +1,7 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.Diagnostics
 open System.Threading
@@ -46,7 +49,7 @@ module Sdl =
     let withSdlInit create destroy action =
         let initResult = create ()
         let error = SDL.SDL_GetError ()
-        if initResult <> 0 && error <> "CoInitialize() DirectX error -2147417850" then
+        if initResult <> 0 then
             trace <| "SDL2# initialization failed due to '" + error + "'."
             FailureExitCode
         else
@@ -157,6 +160,6 @@ module Sdl =
                                     | Right world ->
                                         run8 handleEvent handleUpdate handleRender handlePlay handleExit sdlDeps Running world
                                         SuccessExitCode
-                                    | Left errorMsg ->
-                                        trace errorMsg
+                                    | Left error ->
+                                        trace error
                                         FailureExitCode))))))

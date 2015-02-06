@@ -2,7 +2,10 @@
 open System
 open AStar
 open OpenTK
+open Prime
 open Nu
+open InfinityRpg
+open InfinityRpg.Constants
 
 [<AutoOpen>]
 module CharacterStateModule =
@@ -95,8 +98,8 @@ module CharacterStateModule =
     type CharacterType =
         | Player
         | Goopy
-        | Skelebone
-        | Dargon
+        | Batsy
+        | Zommie
 
     type SpecialData =
         { SpecialType : SpecialType
@@ -110,8 +113,7 @@ module CharacterStateModule =
           TargetType : TargetType }
 
     type EquipmentRatingData =
-        { Level : int
-          PhysicalRating : single // physical power = Level * PhysicalRating
+        { PhysicalRating : single // physical power = Level * PhysicalRating
           MagicalRating : single } // magical power = Level * MagicalRating
 
     type WeaponData =
@@ -149,15 +151,13 @@ module CharacterStateModule =
           ActionType : ActionType }
 
     type CharacterRatingData =
-        { BaseExperience : int // used to calculate base level for all instances of character
-          PhysicalRating : int // physical power is calculated based on level
+        { PhysicalRating : int // physical power is calculated based on level
           MagicRating : int // magic power is calculated based on level
           StaminaRating : int // hp max is calculated based on level
           WillRating : int } // sp max is calculated based on level
 
     type RewardData =
-        { Experience : int
-          Gold : int }
+        { Gold : int }
 
     type CharacterData =
         { Name : string
@@ -198,18 +198,69 @@ module CharacterStateModule =
         { WalkDirection : Direction
           WalkOriginM : Vector2i }
 
+        static member nextPositionM walkDescriptor =
+            walkDescriptor.WalkOriginM + dtovm walkDescriptor.WalkDirection
+
     type [<StructuralEquality; NoComparison>] NavigationDescriptor =
         { WalkDescriptor : WalkDescriptor
           OptNavigationPath : NavigationNode list option }
 
+        static member nextPositionM navigationDescriptor =
+            WalkDescriptor.nextPositionM navigationDescriptor.WalkDescriptor
+
+        static member nextPositionI navigationDescriptor =
+            navigationDescriptor |> NavigationDescriptor.nextPositionM |> vmtovi
+
+        static member nextPosition navigationDescriptor =
+            navigationDescriptor |> NavigationDescriptor.nextPositionI |> vitovf
+
+    type [<StructuralEquality; NoComparison>] ActionDescriptor =
+        { ActionTicks : int64 // an arbitrary number to show a hacky action animation
+          ActionOptTargetPositionM : Vector2i option
+          ActionDataName : string }
+
+        static member getActionDirection currentPosition currentDirection actionDescriptor =
+            match actionDescriptor.ActionOptTargetPositionM with
+            | Some targetPositionM -> targetPositionM - vftovm currentPosition |> vmtod
+            | None -> currentDirection
+
+        static member incActionTicks actionDescriptor =
+            { actionDescriptor with ActionTicks = inc actionDescriptor.ActionTicks }
+
     type [<StructuralEquality; NoComparison>] ActivityState =
-        | Action of ActionData
+        | Action of ActionDescriptor
         | Navigation of NavigationDescriptor
         | NoActivity
+
+        static member isActing activity =
+            match activity with
+            | Action _ -> true
+            | Navigation _ | NoActivity -> false
+
+        static member isNotActing activity =
+            not <| ActivityState.isActing activity
+
         static member isNavigating activity =
             match activity with
-            | Action _ -> false
+            | Action _ | NoActivity -> false
             | Navigation _ -> true
-            | NoActivity -> false
+
         static member isNotNavigating activity =
             not <| ActivityState.isNavigating activity
+
+        static member isNavigatingPath activity =
+            match activity with
+            | Navigation navigationDescriptor -> Option.isSome navigationDescriptor.OptNavigationPath
+            | Action _ | NoActivity -> false
+
+    type [<StructuralEquality; NoComparison>] Turn =
+        | ActionTurn of ActionDescriptor
+        | NavigationTurn of NavigationDescriptor
+        | CancelTurn
+        | NoTurn
+
+    let makeAttackTurn targetPositionM =
+        ActionTurn
+            { ActionTicks = 0L
+              ActionOptTargetPositionM = Some targetPositionM
+              ActionDataName = AttackName }

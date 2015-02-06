@@ -1,5 +1,5 @@
-﻿// Prime - A PRIMitivEs code library.
-// Copyright (C) Bryan Edds, 2012-2014.
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
 
 namespace Nu
 open System
@@ -24,6 +24,7 @@ module XtensionModule =
         { FieldName : string
           FieldType : Type }
 
+    /// An Xtension field.
     type [<StructuralEquality; NoComparison>] XField =
         { FieldValue : obj
           FieldType : Type }
@@ -33,7 +34,7 @@ module XtensionModule =
 
     /// Xtensions (and their supporting types) are a dynamic, functional, and semi-convenient way
     /// to implement dynamic fields.
-    /// TODO: use DebuggerTypeProxyAttribute to make xfields easier to browse in the debugger.
+    /// TODO: use DebuggerTypeProxyAttribute to make xFields easier to browse in the debugger.
     type [<StructuralEquality; NoComparison>] Xtension =
         { XFields : XFields
           CanDefault : bool
@@ -61,7 +62,8 @@ module XtensionModule =
             else failwith <| "Xtension field '" + memberName + "' does not exist and no default is permitted because CanDefault is false."
 
         /// The dynamic look-up operator for an Xtension.
-        /// Example -   let parallax = entity?Parallax : single
+        /// Example:
+        ///     let parallax = entity?Parallax : single
         static member (?) (xtension, memberName) : 'r =
 
             // check if dynamic member is an existing field
@@ -79,10 +81,11 @@ module XtensionModule =
                 Xtension.tryGetDefaultValue xtension memberName
 
         /// The dynamic assignment operator for an Xtension.
-        /// Example - let entity = entity.Position <- Vector2 (4.0, 5.0).
+        /// Example:
+        ///     let entity = entity.Position <- Vector2 (4.0, 5.0).
         static member (?<-) (xtension, fieldName, value : 'a) =
     #if DEBUG
-            // nop'ed outside of debug mode for efficiency
+            // NOTE: nop'ed outside of debug mode for efficiency
             // TODO: consider writing a 'Map.addDidContainKey' function to efficently add and return a
             // result that the key was already contained.
             if xtension.Sealed && not <| Map.containsKey fieldName xtension.XFields

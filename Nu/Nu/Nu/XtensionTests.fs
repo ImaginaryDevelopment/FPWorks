@@ -1,4 +1,7 @@
-﻿namespace Nu
+﻿// Nu Game Engine.
+// Copyright (C) Bryan Edds, 2013-2015.
+
+namespace Nu
 open System
 open System.IO
 open System.Xml
@@ -30,11 +33,10 @@ module XtensionTests =
         xmlWriter.Flush ()
         memoryStream :> Stream
 
-    let readFromStream read (stream : Stream) target =
+    let readFromStream read (stream : Stream) target : unit =
         let xmlReader = XmlReader.Create stream
         let xmlDocument = let emptyDoc = XmlDocument () in (emptyDoc.Load xmlReader; emptyDoc)
-        let result = read (xmlDocument.SelectSingleNode RootNodeName) target
-        result
+        read (xmlDocument.SelectSingleNode RootNodeName) target
 
     let [<Fact>] canAddField () =
         let xtn = Xtension.empty
@@ -42,12 +44,10 @@ module XtensionTests =
         let fieldValue = xtn?TestField
         Assert.Equal (5, fieldValue)
 
-    let [<Fact>] cantAddFieldWhenSealed () =
 #if DEBUG
+    let [<Fact>] cantAddFieldWhenSealed () =
         let xtn = Xtension.safe
         Assert.Throws<Exception> (fun () -> ignore <| xtn?TestField <- 0)
-#else
-        ()
 #endif
 
     let [<Fact>] cantAccessNonexistentField () =
@@ -67,19 +67,11 @@ module XtensionTests =
         let fieldValue = xtd?TestField
         Assert.Equal (5, fieldValue)
 
-    let [<Fact>] xtensionSerializationWorks () =
-        let xtn = Xtension.mixed
-        let xtn = xtn?TestField <- 5
-        let xtn = { xtn with Sealed = true } // NOTE: equality semantics for Xtension include safety configuration info
-        use stream = writeToStream (Serialization.writeXtension tautology3) xtn
-        ignore <| stream.Seek (0L, SeekOrigin.Begin)
-        let xtnRead = readFromStream (fun node _ -> Serialization.readXtension node) stream <| Xtension.mixed
-        Assert.Equal (xtn, xtnRead)
-
     let [<Fact>] xtensionSerializationViaContainingTypeWorks () =
         let xtd = { Xtension = Xtension.mixed }
         let xtd = xtd?TestField <- 5
-        use stream = writeToStream (Serialization.writePropertiesFromTarget tautology3) xtd
+        use stream = writeToStream (Reflection.writeMemberValuesFromTarget tautology3) xtd
         ignore <| stream.Seek (0L, SeekOrigin.Begin)
-        let xtdRead = readFromStream (fun node target -> Serialization.readPropertiesToTarget node target; target) stream { Xtension = Xtension.mixed }
+        let xtdRead = { xtd with Xtension = xtd.Xtension } // hacky copy
+        readFromStream (fun node target -> Reflection.readMemberValuesToTarget node target) stream { Xtension = Xtension.mixed }
         Assert.Equal (xtd, xtdRead)

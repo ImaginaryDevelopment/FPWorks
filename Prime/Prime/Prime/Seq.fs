@@ -1,5 +1,5 @@
 ﻿// Prime - A PRIMitivEs code library.
-// Copyright (C) Bryan Edds, 2012-2014.
+// Copyright (C) Bryan Edds, 2012-2015.
 
 [<RequireQualifiedAccess>]
 module Seq
@@ -20,6 +20,11 @@ let inline headOrDefault seq aDefault =
 let inline definitize opts =
     Seq.choose id opts
 
+/// Fold with two inputs (plus state).
+let fold2 folder state seq seq2 =
+    let zipped = Seq.zip seq seq2
+    Seq.fold (fun state (a, b) -> folder state a b) state zipped
+
 /// Fold, now with a counter!
 let foldi folder state seq =
     let (_, result) =
@@ -28,6 +33,10 @@ let foldi folder state seq =
             (0, state)
             seq
     result
+
+/// Fold-back for seqs.
+let foldBack folder values state =
+    List.foldBack folder (List.ofSeq values) state
 
 /// Check if no elements satisfy a predicate in a seq.
 let fornone pred seq =

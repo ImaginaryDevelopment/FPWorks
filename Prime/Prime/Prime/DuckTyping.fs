@@ -1,5 +1,5 @@
 ﻿// Prime - A PRIMitivEs code library.
-// Copyright (C) Bryan Edds, 2012-2014.
+// Copyright (C) Bryan Edds, 2012-2015.
 
 namespace Prime
 module DuckTypingExample =
@@ -35,18 +35,18 @@ module DuckTypingExample =
 // TODO: move this into its own file
 module TypeAbsorption =
 
-    type [<NoEquality; NoComparison>] 't Absorb =
+    type [<NoEquality; NoComparison>] 'a Absorb =
         { Number : int
-          TypeCarrier : 't -> unit }
+          TypeCarrier : 'a -> unit }
 
         static member make number =
-            { Number = number; TypeCarrier = fun (_ : 't) -> () }
+            { Number = number; TypeCarrier = fun (_ : 'a) -> () }
 
     let ( ->- ) (a : 'a Absorb) (b : 'b Absorb) =
         Absorb<'a>.make <| a.Number + b.Number
 
-    let ( -|- ) (a : 't Absorb) (b : 't Absorb) =
-        Absorb<'t>.make <| a.Number + b.Number
+    let ( -|- ) (a : 'a Absorb) (b : 'a Absorb) =
+        Absorb<'a>.make <| a.Number + b.Number
 
     let ( -<- ) (a : 'a Absorb) (b : 'b Absorb) =
         Absorb<'b>.make <| a.Number + b.Number
