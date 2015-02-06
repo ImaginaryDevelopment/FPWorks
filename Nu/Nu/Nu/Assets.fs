@@ -145,7 +145,9 @@ module Assets =
                                   Refinements = refinements })
                             filePaths
                     Some <| List.ofArray assets
-                with exn -> debug <| "Invalid directory '" + directory + "'."; None
+                with exn -> 
+                    let fullpath = Path.Combine(Environment.CurrentDirectory,directory)
+                    debug <| "Invalid directory '" + directory + "'. from " + Environment.CurrentDirectory + " resolves as " + fullpath; None
             | None -> None
         | None -> None
 
@@ -163,6 +165,8 @@ module Assets =
                         match tryLoadAssetsFromAssetsNode usingRawAssets assetNode with
                         | Some loadedAssets -> loadedAssets @ assets
                         | None -> debug <| "Invalid assets node in '" + node.Name + "' in asset graph."; assets
+                    | "#comment" ->
+                        assets
                     | invalidNodeType -> debug <| "Invalid package child node type '" + invalidNodeType + "'."; assets)
                 []
                 (List.ofSeq <| enumerable node.ChildNodes)
