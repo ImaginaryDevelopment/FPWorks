@@ -65,14 +65,21 @@ module Metadata =
                 InvalidMetadata errorMessage
 
     let private generateTileMapMetadata asset =
-        try let tmxMap = TmxMap asset.FilePath
-            let tileSets = List.ofSeq tmxMap.Tilesets
-            let tileSetImages = List.map getTileSetProperties tileSets
-            TileMapMetadata (asset.FilePath, tileSetImages, tmxMap)
-        with _ as exn ->
-            let errorMessage = "Failed to load TmxMap '" + asset.FilePath + "' due to '" + acstring exn + "'."
+        let separator = Path.DirectorySeparatorChar |> fun c-> c.ToString()
+        let targetFilePath = asset.FilePath.Replace("/",separator)
+        if not <| File.Exists targetFilePath then
+            let errorMessage = "Failed to load TmxMap due to missing file '" + targetFilePath + "'."
             trace errorMessage
             InvalidMetadata errorMessage
+        else
+            try let tmxMap = TmxMap targetFilePath
+                let tileSets = List.ofSeq tmxMap.Tilesets
+                let tileSetImages = List.map getTileSetProperties tileSets
+                TileMapMetadata (targetFilePath, tileSetImages, tmxMap)
+            with _ as exn ->
+                let errorMessage = "Failed to load TmxMap '" + asset.FilePath + "' due to '" + acstring exn + "'."
+                trace errorMessage
+                InvalidMetadata errorMessage
 
     let private generateAssetMetadata asset =
         let extension = Path.GetExtension asset.FilePath
