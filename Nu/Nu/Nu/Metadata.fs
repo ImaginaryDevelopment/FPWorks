@@ -43,14 +43,16 @@ module Metadata =
             raise <| TileSetPropertyNotFoundException errorMessage
 
     let private generateTextureMetadata asset =
-        if not <| File.Exists asset.FilePath then
-            let errorMessage = "Failed to load Bitmap due to missing file '" + asset.FilePath + "'."
+        let separator = Path.DirectorySeparatorChar |> fun c-> c.ToString()
+        let targetFilePath = asset.FilePath.Replace("/",separator);
+        if not <| File.Exists targetFilePath then
+            let errorMessage = "Failed to load Bitmap due to missing file '" + targetFilePath + "'."
             trace errorMessage
             InvalidMetadata errorMessage
         else
             // TODO: find an efficient way to pull metadata from a bitmap file without loading its
             // actual image buffer.
-            try use bitmap = new Bitmap (asset.FilePath)
+            try use bitmap = new Bitmap (targetFilePath)
                 if bitmap.PixelFormat = Imaging.PixelFormat.Format32bppArgb
                 then TextureMetadata <| Vector2i (bitmap.Width, bitmap.Height)
                 else
@@ -58,7 +60,7 @@ module Metadata =
                     trace errorMessage
                     InvalidMetadata errorMessage
             with _ as exn ->
-                let errorMessage = "Failed to load Bitmap '" + asset.FilePath + "' due to '" + acstring exn + "'."
+                let errorMessage = "Failed to load Bitmap '" + targetFilePath + "' due to '" + acstring exn + "'."
                 trace errorMessage
                 InvalidMetadata errorMessage
 

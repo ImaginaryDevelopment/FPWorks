@@ -254,7 +254,9 @@ module WorldGroupModule =
                     (enumerable groupNodes)
 
         static member readGroupHierarchyFromFile (filePath : string) world =
-            use reader = XmlReader.Create filePath
+            let separator = Path.DirectorySeparatorChar |> fun c-> c.ToString()
+            let targetFilePath = filePath.Replace("/",separator);
+            use reader = XmlReader.Create targetFilePath
             let document = let emptyDoc = XmlDocument () in (emptyDoc.Load reader; emptyDoc)
             let rootNode = document.[RootNodeName]
             let groupNode = rootNode.[GroupNodeName]
