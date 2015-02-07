@@ -66,6 +66,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="SpaceyConstants.fs" />
+    <Compile Include="SpaceyDispatchers.fs" />
     <Compile Include="SpaceyDispatcher.fs" />
     <Compile Include="Program.fs" />
     <None Include="App.config" />

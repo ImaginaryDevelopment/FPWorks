@@ -8,6 +8,7 @@ open Nu.Constants
 let GuiPackageName = "Gui"
 let StagePackageName = "Stage"
 
+let PlayerBulletImage = { PackageName = DefaultPackageName; AssetName = "Image" }
     // this constant describes the 'dissolving' transition behavior of game's screens
 let DissolveData =
     {
@@ -28,6 +29,7 @@ let Title = Screen.proxy <| ntoa TitleName
 // their respective documentation comments.
 let TitleGroupName = "Group"
 let TitleGroup = Group.proxy <| satoga Title.ScreenAddress TitleGroupName
+
 
 // these constants specify the file paths from which various simulants are loaded
 let TitleGroupFilePath = "Assets/Gui/Title.nugroup"

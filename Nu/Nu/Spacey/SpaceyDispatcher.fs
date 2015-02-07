@@ -8,7 +8,6 @@ type SpaceyDispatcher () =
 
         // this function creates the BlazeVector title screen to the world
         static let createTitleScreen world =
-
             // this creates a dissolve screen from the specified file with the given parameters
             let world = snd <| World.createDissolveScreenFromGroupFile false DissolveData typeof<ScreenDispatcher>.Name TitleGroupFilePath (Some TitleName) world
 
@@ -30,6 +29,7 @@ type SpaceyDispatcher () =
             let world = snd <| World.createDissolveScreenFromGroupFile false DissolveData typeof<ScreenDispatcher>.Name StageGuiFilePath (Some StageName) world
             let world =  World.subscribe4 handleStageScreenStart (SelectEventAddress ->>- Stage.ScreenAddress) Game world
             let world = World.subscribe4 handleStageScreenLeave (DeselectEventAddress ->>- Stage.ScreenAddress) Game world
+
             world
 
         // game registration is where the game's high-level logic is set up!

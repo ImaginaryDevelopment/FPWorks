@@ -22,6 +22,13 @@ module Program =
         // make our game-specific game dispatcher...
         override this.MakeOptGameDispatcher () =
             Some (SpaceyModule.SpaceyDispatcher () :> GameDispatcher)
+        // make our game-specific entity dispatchers...
+        override this.MakeEntityDispatchers () =
+            [
+                BulletDispatcher () :> EntityDispatcher
+                PlayerDispatcher () :> EntityDispatcher
+                //EnemyDispatcher () :> EntityDispatcher
+            ]
     // this the entry point for the your Nu application
     let [<EntryPoint; STAThread>] main _ =
 
