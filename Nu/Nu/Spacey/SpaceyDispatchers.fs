@@ -56,33 +56,53 @@ module BulletModule =
                 World.monitor handleCollision (CollisionEventAddress ->>- bullet.EntityAddress) bullet
 [<AutoOpen>]
 module PlayerModule =
-
+    let trace s = System.Diagnostics.Trace.WriteLine(s)
     type PlayerDispatcher () =
         inherit TopViewCharacterDispatcher()
+        static let bulletStart (sourcePosition:Vector2) (targetPosition:Vector2) n = 
+            let x1,y1,x2,y2 = sourcePosition.X,sourcePosition.Y, targetPosition.X, targetPosition.Y
+            let slope = (y2 - y1) / (x2-x1)
+            let pointSlope x = slope * (x - x1) + y1
+            let x3,y3 = 
+                n+10.0f
+                |> fun x -> x,pointSlope x
+            
+            let result = Vector2(x3,y3)
+            sprintf "source %A target  %A n %A slope %A  point %A" sourcePosition targetPosition n slope result |> trace
+            result
 
         static let createBullet (playerTransform : Transform) (group : Group) targetPosition world =
             let (bullet, world) = World.createEntity typeof<BulletDispatcher>.Name None group world
-            targetPosition |> ignore
-            let bulletPosition =   playerTransform.Position + Vector2 (playerTransform.Size.X * 1.0f, playerTransform.Size.Y * 0.5f)
+            //let bulletPosition =   playerTransform.Position + Vector2 (playerTransform.Size.X * 1.0f, playerTransform.Size.Y * 0.5f)
+            let bulletPosition = bulletStart playerTransform.Position targetPosition <| playerTransform.Size.X / 2.0f // player is a circle
+            sprintf "creating bullet at %A" bulletPosition |> trace
             let world = bullet.SetPosition bulletPosition world
             let world = bullet.SetDepth playerTransform.Depth world
             let world = World.propagateEntityPhysics bullet world
             (bullet, world)
 
-        static let propelBullet (bullet : Entity) world =
-            let world = World.applyBodyLinearImpulse (Vector2 (50.0f, 0.0f)) (bullet.GetPhysicsId world) world
+        static let propelBullet (bullet : Entity) direction world =
+            let world = World.applyBodyLinearImpulse direction (bullet.GetPhysicsId world) world
             World.playSound 1.0f NuSplashSound world
 
-        static let shootBullet (player : Entity) targetPosition world =
+        static let shootBullet (player : Entity) (targetPosition:Vector2) world =
             let playerTransform = player.GetTransform world
             let playerGroup = Group.proxy <| eatoga player.EntityAddress
+            let velocity = 5.5f
+            let direction =
+                match playerTransform.Position.X > targetPosition.X, playerTransform.Position.Y> targetPosition.Y with
+                | true,false -> Vector2(velocity,-velocity)
+                | true,true -> Vector2(velocity,velocity)
+                | false,true -> Vector2(-velocity,velocity)
+                | false,false -> Vector2(-velocity,-velocity)
+                
             let (bullet, world) = createBullet playerTransform playerGroup targetPosition world
-            propelBullet bullet world
+            propelBullet bullet direction world 
         static let handleSpawnBullet event world =
             let player = event.Subscriber : Entity
             let mouseButtonData = event.Data : MouseButtonData
             if World.isGamePlaying world then
-                if World.getTickTime world % 6L = 0L then
+                if World.getTickTime world % 3L = 0L then
                     let world = shootBullet player mouseButtonData.Position world
                     (Cascade, world)
                 else (Cascade, world)
