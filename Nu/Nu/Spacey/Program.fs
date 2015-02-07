@@ -19,7 +19,9 @@ module Program =
     // defined for this project yet.
     type SpaceyPlugin () =
         inherit NuPlugin ()
-
+        // make our game-specific game dispatcher...
+        override this.MakeOptGameDispatcher () =
+            Some (SpaceyModule.SpaceyDispatcher () :> GameDispatcher)
     // this the entry point for the your Nu application
     let [<EntryPoint; STAThread>] main _ =
 

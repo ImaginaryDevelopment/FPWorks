@@ -7,4 +7,10 @@
     <Assets directory="Assets/Default" extension="ogg" associations="[Audio]"/>
     <Assets directory="Assets/Default" extension="tmx"/>
   </Package>
+  <Package name="Stage">
+    <Assets directory="Assets/Stage" extension="nugroup"/>
+  </Package>
+  <Package name="Gui">
+    <Assets directory="Assets/Gui" extension="nugroup"/>
+  </Package>
 </Root>
