@@ -5,7 +5,8 @@ open Nu.WorldConstants
 
 type SpaceyDispatcher () =
         inherit GameDispatcher ()
-                // this function creates the BlazeVector title screen to the world
+
+        // this function creates the BlazeVector title screen to the world
         static let createTitleScreen world =
 
             // this creates a dissolve screen from the specified file with the given parameters
@@ -18,10 +19,17 @@ type SpaceyDispatcher () =
             // subscribes to the event that is raised when the Title screen's Exit button is clicked,
             // and handles the event by exiting the game
             World.subscribe4 World.handleAsExit (ClickEventAddress ->>- TitleExit.EntityAddress) Game world
-
-                // and so on.
+        static let handleStageScreenStart _ world =
+            let (_, world) = World.readGroupFromFile StageGameplayFilePath (Some StageGroupName) Stage world
+            (Cascade, world)
+        static let handleStageScreenLeave _ world =
+            let world = World.destroyGroup StageGroup world
+            (Cascade, world)
+        // and so on.
         static let createStageScreen world =
             let world = snd <| World.createDissolveScreenFromGroupFile false DissolveData typeof<ScreenDispatcher>.Name StageGuiFilePath (Some StageName) world
+            let world =  World.subscribe4 handleStageScreenStart (SelectEventAddress ->>- Stage.ScreenAddress) Game world
+            let world = World.subscribe4 handleStageScreenLeave (DeselectEventAddress ->>- Stage.ScreenAddress) Game world
             world
 
         // game registration is where the game's high-level logic is set up!
@@ -36,5 +44,6 @@ type SpaceyDispatcher () =
             let (splash, world) = World.createSplashScreen false SplashData typeof<ScreenDispatcher>.Name Title (Some SplashName) world
             // play a neat sound effect, select the splash screen, and we're off!
             let world = World.playSound 1.0f NuSplashSound world
+            
             World.selectScreen splash world
 

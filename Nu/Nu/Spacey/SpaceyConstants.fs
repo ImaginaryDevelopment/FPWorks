@@ -61,3 +61,5 @@ let TitleExit = Entity.proxy <| gatoea TitleGroup.GroupAddress TitleExitName
 // these constants specify names and proxies for various simulants of the state screen
 let StageName = "Stage"
 let Stage = Screen.proxy <| ntoa StageName
+let StageGroupName = "Group"
+let StageGroup = Group.proxy <| satoga Stage.ScreenAddress StageGroupName
