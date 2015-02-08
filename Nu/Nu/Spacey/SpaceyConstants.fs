@@ -16,7 +16,7 @@ let DissolveData =
         OutgoingTime = 30L
         DissolveImage = DefaultDissolveImage 
     }
-
+let BulletForce = 0.5f
 // these are like the pair of constants for splash screen above, but for the title screen
 let TitleName = "Title"
 let Title = Screen.proxy <| ntoa TitleName

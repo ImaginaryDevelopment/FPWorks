@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <Group dispatcherName="GroupDispatcher">
+    <Name>Group</Name>
+    <PublishChanges>True</PublishChanges>
+    <Persistent>True</Persistent>
+    <Entities>
+      <Entity dispatcherName="ButtonDispatcher">
+        <Name>Exit</Name>
+        <Position>160, -128</Position>
+        <Depth>15</Depth>
+        <Size>256, 64</Size>
+      </Entity>
+      <Entity dispatcherName="TextDispatcher">
+        <Position>-88, -128</Position>
+        <Depth>10</Depth>
+        <Size>128, 64</Size>
+        <Text>Exit</Text>
+      </Entity>
+      <Entity dispatcherName="TextDispatcher">
+        <Position>-336, 168</Position>
+        <Depth>10</Depth>
+        <Size>640, 64</Size>
+        <Text>Spacey</Text>
+      </Entity>
+      <Entity dispatcherName="ButtonDispatcher">
+        <Name>Play</Name>
+        <Position>160, -48</Position>
+        <Depth>10</Depth>
+        <Size>256, 64</Size>
+      </Entity>
+      <Entity dispatcherName="TextDispatcher">
+        <Position>-112, -48</Position>
+        <Depth>10</Depth>
+        <Size>256, 64</Size>
+        <Text>New Game</Text>
+      </Entity>
+    </Entities>
+  </Group>
+</Root>

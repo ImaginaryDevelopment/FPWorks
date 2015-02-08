@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <Group dispatcherName="GroupDispatcher">
+    <Name>Group</Name>
+    <PublishChanges>True</PublishChanges>
+    <Persistent>True</Persistent>
+    <Entities>
+      <Entity dispatcherName="FeelerDispatcher">
+        <Name>Feeler</Name>
+        <Depth>8</Depth>
+        <Size>960, 544</Size>
+      </Entity>
+      <Entity dispatcherName="TextDispatcher">
+        <Name>HelpText</Name>
+        <Position>-432, 128</Position>
+        <Depth>10</Depth>
+        <Size>640, 128</Size>
+        <Text>Press Escape to see help or pause.</Text>
+      </Entity>
+    </Entities>
+  </Group>
+</Root>

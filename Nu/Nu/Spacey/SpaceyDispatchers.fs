@@ -15,7 +15,7 @@ module BulletModule =
     type BulletDispatcher () =
         inherit EntityDispatcher ()
 
-        static let [<Literal>] BulletLifetime = 27L
+        static let [<Literal>] BulletLifetime = 40L
 
         static let handleTick event world =
             let bullet = event.Subscriber : Entity
@@ -36,15 +36,17 @@ module BulletModule =
             else (Cascade, world)
 
         static member FieldDefinitions =
-            [define? Size <| Vector2 (24.0f, 24.0f)
-             define? Density 0.25f
-             define? Restitution 0.5f
-             define? LinearDamping 0.0f
-             define? GravityScale 0.0f
-             define? IsBullet true
-             define? CollisionExpr "Circle"
-             define? SpriteImage PlayerBulletImage
-             define? Age 0L]
+            [
+                define? Size <| Vector2 (24.0f, 24.0f)
+                define? Depth 6
+                define? Density 0.25f
+                define? Restitution 0.5f
+                define? LinearDamping 0.0f
+                define? GravityScale 0.0f
+                define? IsBullet true
+                define? CollisionExpr "Circle"
+                define? SpriteImage PlayerBulletImage
+                define? Age 0L]
 
         static member IntrinsicFacetNames =
             [typeof<RigidBodyFacet>.Name
@@ -59,7 +61,10 @@ module PlayerModule =
     let trace s = System.Diagnostics.Trace.WriteLine(s)
     type PlayerDispatcher () =
         inherit TopViewCharacterDispatcher()
+//        static let screenToScene (p:Vector2) maxSourceX maxSourceY maxXTarget maxYTarget = 
+//            p.X * maxXTarget / maxSourceX, p.Y * maxYTarget / maxSourceY
         static let bulletStart (sourcePosition:Vector2) (targetPosition:Vector2) n = 
+
             let x1,y1,x2,y2 = sourcePosition.X,sourcePosition.Y, targetPosition.X, targetPosition.Y
             let slope = (y2 - y1) / (x2-x1)
             let pointSlope x = slope * (x - x1) + y1
